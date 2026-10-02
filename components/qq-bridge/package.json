@@ -1,0 +1,19 @@
+{
+  "name": "qq-bridge",
+  "version": "0.1.7",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "description": "Attributed WeChat social runtime subset of qq-bridge.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Derpyu520/qq-bridge"
+  },
+  "scripts": {
+    "start:social": "node src/social-bridge.js",
+    "test:social": "node --test scripts/test-social-bridge.mjs scripts/test-social-e2e.mjs"
+  }
+}

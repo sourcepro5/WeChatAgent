@@ -1,0 +1,30 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { selectRoleText } from '../components/qq-bridge/src/role-card.js';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const read=file=>JSON.parse(fs.readFileSync(path.join(root,file),'utf8').replace(/^\uFEFF/,''));
+const config=read('config/wechatagent.json'),token=fs.readFileSync(path.join(root,'state/social-dsh-token.txt'),'utf8').trim();
+const base=`http://127.0.0.1:${config.ports.dshPlugin}`;
+const key='wechat:private:native-context-check-'+Date.now();
+const personaName=config.persona.default;
+const persona=selectRoleText(fs.readFileSync(path.join(root,'roles',personaName+'.md'),'utf8'),'v2');
+const identity={conversationKey:key,conversationName:'上下文功能验证',personaName,persona};
+async function request(route,body){const response=await fetch(base+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(125000)});const result=await response.json();if(!response.ok)throw new Error(result.detail ?? result.error ?? 'Native context verification failed');return result;}
+async function state(){return (await request('/sessions')).sessions.find(session=>session.conversationKey===key);}
+const configured=await request('/configure',identity);
+await request('/followup',{...identity,message:'这是插件功能验证，只输出 SILENT，不需要向微信发送任何内容。'});
+const first=await state();
+await request('/followup',{...identity,message:'这是第二条新的验证消息，沿用之前的人格，只输出 SILENT。'});
+const second=await state();
+if(first.initializations!==1 || second.initializations!==1)throw new Error('Persona was duplicated during normal followup');
+await sleep(500);
+const compacted=await request('/compact',{conversationKey:key});
+if(!compacted.compacted)throw new Error('No useful native compaction was performed');
+await request('/followup',{...identity,message:'这是原生压缩后的验证消息，只输出 SILENT。'});
+const after=await state();
+if(after.initializations!==2 || after.compactions<1 || after.sessionId!==configured.sessionId)throw new Error('Native compaction did not restore persona in the same session');
+const result={sessionId:after.sessionId,title:after.title,initializationsAfterFirst:first.initializations,initializationsAfterSecond:second.initializations,initializationsAfterCompaction:after.initializations,nativeCompactions:after.compactions,sameSession:true,wechatMessagesSent:0};
+fs.writeFileSync(path.join(root,'state/native-context-verification.json'),JSON.stringify(result,null,2)+'\n');
+console.log(JSON.stringify(result));

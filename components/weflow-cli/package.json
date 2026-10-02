@@ -1,0 +1,11 @@
+{
+  "name": "weflow-cli",
+  "version": "1.8.2",
+  "private": true,
+  "license": "MIT",
+  "description": "Database-only Python vendor subset; full CLI and resources are not distributed.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zhuobichen/weflow-cli"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "project": "WeChatAgent",
+  "version": "0.1.0",
+  "distribution": "source-only",
+  "components": [
+    {
+      "name": "Social Bridge runtime subset",
+      "directory": "components/qq-bridge",
+      "upstream": "https://github.com/Derpyu520/qq-bridge",
+      "version": "0.1.7",
+      "license": "MIT",
+      "modified": true,
+      "notes": "Default WeChat social modules and tests only; see component README."
+    },
+    {
+      "name": "NT database reader subset",
+      "directory": "components/weflow-cli",
+      "upstream": "https://github.com/zhuobichen/weflow-cli",
+      "version": "1.8.2",
+      "commit": "3d56da9b91ab46f610ca811029e5782c528a58ec",
+      "license": "MIT",
+      "modified": true,
+      "notes": "Retained database API bodies copied; unused discovery, scanning, CLI and all native resources omitted."
+    },
+    {
+      "name": "DSH Social Plugin",
+      "directory": "packages/dsh-social-bridge-plugin",
+      "sdk": "@deepseek-ai/dsh-llm@0.1.7-rc.2",
+      "notes": "Source and lock file only; dependencies installed separately."
+    }
+  ],
+  "externalComponents": [
+    {
+      "name": "WeChat-Hook",
+      "upstream": "https://github.com/aixed/WeChat-Hook",
+      "commit": "e905d07ade50d2c6472e4eb3bd4f3fe19cf662c6",
+      "targetWeChat": "4.1.10.27",
+      "distributed": false,
+      "license": "Overall license not confirmed"
+    },
+    {
+      "name": "WeFlow Desktop reference",
+      "upstream": "https://github.com/hicccc77/WeFlow",
+      "sourceLicense": "CC-BY-NC-SA-4.0",
+      "distributed": false
+    },
+    {
+      "name": "Historical WeFlowBackup reference",
+      "upstream": "https://github.com/Nixer-2301/WeFlowBackup",
+      "distributed": false
+    },
+    {
+      "name": "WeChat and DSH desktop clients",
+      "distributed": false,
+      "notes": "Independently acquired under their own terms."
+    }
+  ]
+}

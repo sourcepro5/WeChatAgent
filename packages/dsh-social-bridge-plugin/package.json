@@ -1,0 +1,10 @@
+{
+  "name": "dsh-social-bridge-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "dependencies": { "@deepseek-ai/dsh-llm": "0.1.7-rc.2" },
+  "exports": { ".": "./index.js", "./native-context.mjs": "./native-context.mjs", "./image-input.mjs": "./image-input.mjs", "./cordis.patch.yml": "./cordis.patch.yml", "./social-tool-restrict.mjs": "./social-tool-restrict.mjs" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

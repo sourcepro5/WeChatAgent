@@ -1,0 +1,109 @@
+# WeChatAgent 本机运行数据：凭据、消息、图片、会话映射、客户端及构建缓存
+/state/
+**/.local-state/
+
+# 本机账号、白名单和配置备份；公开示例配置用于首次安装
+/config/wechatagent.json
+/config/wechatagent.pre-*.json
+!/config/wechatagent.example.json
+/apps/bridge/config.json
+/apps/bridge/config.json.*
+/apps/bridge/config.social.json
+/apps/bridge/config.social.json.*
+/apps/bridge/state/
+/apps/bridge/roles/
+/components/qq-bridge/config.json
+/components/qq-bridge/config.json.*
+/components/qq-bridge/config.social.json
+/components/qq-bridge/config.social.json.*
+/components/qq-bridge/state/
+
+# 本机自定义人格在公开授权与隐私核验后再另行发布
+# 首次安装使用可提交的 roles/示例助手.md
+/roles/*.md
+!/roles/README.md
+!/roles/示例助手.md
+
+# 环境凭据；示例环境文件可提交
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# 可由安装脚本恢复的依赖与解释器缓存
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.electron/
+
+# 已知的生成目录；组件的 resources、源码和依赖锁文件用于安装与构建
+/apps/weflow/dist/
+/apps/weflow/dist-electron/
+/apps/weflow/dist-ssr/
+/apps/weflow/release/
+/apps/weflow/out/
+/components/WeFlowComplete/dist/
+/components/WeFlowComplete/dist-electron/
+/components/WeFlowComplete/dist-ssr/
+/components/WeFlowComplete/release/
+/components/WeFlowComplete/out/
+/components/weflow-cli/dist/
+/components/weflow-cli/output/
+/components/weflow-cli/logs/
+/components/weflow-cli/models/
+/components/weflow-cli/private/
+/components/weflow-cli/scripts/user/
+/components/weflow-cli/scripts/.portable_package/
+
+# 运行日志、临时文件、编辑备份和 npm 打包产物
+*.log
+*.log.*
+*.pid
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+*.tgz
+
+# 根目录下载归档；组件资源目录中的安装素材按来源保留
+/*.zip
+/*.7z
+/*.rar
+
+# 编辑器个人状态与 Windows/macOS 缓存
+.vs/
+.idea/
+*.suo
+*.user
+*.ipch
+Thumbs.db
+.DS_Store
+
+# Hook 上游未声明整体许可证，沿用 LICENSES.md 中的分发范围
+# 按 docs/WECHAT_HOOK.md 单独准备；项目覆盖层 scripts/native-hook 可提交
+/components/WeChat-Hook/
+
+# Source distribution excludes downloaded binaries and private database files.
+*.exe
+*.dll
+*.node
+*.pdb
+*.obj
+*.lib
+*.so
+*.dylib
+*.zip
+*.7z
+*.rar
+*.db
+*.db-wal
+*.db-shm
