@@ -51,6 +51,7 @@ export class SocialEngine {
     maxPerMinute = 3, maxPerTenMinutes = 10, log = () => {} }) {
     Object.assign(this, { buffer, decide, send, roleFor, personaNameFor, wakeWords, mode, batchMs,
       minIntervalMs, privateMinIntervalMs, maxPerMinute, maxPerTenMinutes, log });
+    if (![maxPerMinute,maxPerTenMinutes].every(value => Number.isSafeInteger(value) && value > 0)) throw new TypeError('Reply quotas must be positive integers');
     this.timers = new Map(); this.running = new Set(); this.dirty = new Set();
     this.pendingDirect = new Set(); this.sentAt = new Map();
     this.decisions = new Map();
@@ -91,6 +92,7 @@ export class SocialEngine {
         rows.push(row); imageCount+=row.images?.length ?? 0;
       }
       if (!rows.length) return;
+      direct ||= rows.some(row => row.direct_mention || isDirectMention(row, this.wakeWords));
       const remembered = this.decisions.get(key);
       const throughId = remembered?.throughId ?? rows.at(-1)?.id;
       const times = this.sentAt.get(key) ?? [];
@@ -98,10 +100,18 @@ export class SocialEngine {
       const recent = times.filter((t) => now - t < 600000);
       this.sentAt.set(key, recent);
       const interval = message.kind === 'private' ? this.privateMinIntervalMs : this.minIntervalMs;
-      if (recent.length && now - recent.at(-1) < interval
-        || recent.filter((t) => now - t < 60000).length >= this.maxPerMinute
-        || recent.length >= this.maxPerTenMinutes) {
-        this.log(`[Social] ${key} cooldown`); return;
+      const minute = recent.filter(t => now - t < 60000);
+      const readyAt = Math.max(now, recent.length ? recent.at(-1) + interval : now,
+        minute.length >= this.maxPerMinute ? minute[minute.length-this.maxPerMinute] + 60000 : now,
+        recent.length >= this.maxPerTenMinutes ? recent[recent.length-this.maxPerTenMinutes] + 600000 : now);
+      if (readyAt > now) {
+        const delay = readyAt-now+1;
+        this.log(`[Social] ${key} cooldown wait_ms=${delay}`);
+        clearTimeout(this.timers.get(key));
+        this.timers.set(key, setTimeout(() => {
+          this.timers.delete(key); void this.#run(key, this.buffer.recent(key,1)[0] ?? message, direct);
+        }, delay));
+        return;
       }
       const role = this.roleFor(key);
       const prompt = message.kind === 'private'
@@ -111,8 +121,10 @@ export class SocialEngine {
         conversationName: message.conversation_name ?? rows.at(-1)?.conversation_name ?? '',
         images: rows.flatMap(row => row.images ?? []),
         batchId: crypto.createHash('sha256').update(JSON.stringify([key, rows.map(row => row.id)])).digest('hex') };
+      const decisionStarted = Date.now();
+      this.log(`[Social] ${key} dispatch rows=${rows.length} images=${metadata.images.length} oldest_age_ms=${Math.max(0,now-rows[0].timestamp*1000)}`);
       const result = remembered?.result ?? parseSocialDecision(await this.decide(key, prompt, metadata));
-      this.log(`[Social] ${key} decision=${result.decision}`);
+      this.log(`[Social] ${key} decision=${result.decision} decision_ms=${Date.now()-decisionStarted}`);
       if (result.decision === 'RESPOND') {
         const target = remembered?.message ?? message;
         this.decisions.set(key, { result, throughId, message: target });

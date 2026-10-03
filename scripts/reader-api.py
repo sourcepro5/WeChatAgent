@@ -234,7 +234,10 @@ class Reader:
                 row = connection.execute('SELECT local_type,message_content FROM "' + table + '" WHERE local_id=? AND create_time=? AND server_id=? LIMIT 1',
                     (descriptor['localId'], descriptor['createTime'], int(descriptor['serverId'] or 0))).fetchone()
                 if row and row[0] in (3, 47) and row[0] == descriptor.get('localType', 3):
-                    return {'imageXml': nt._decode_content(row[1]), 'localType': row[0]}
+                    content = nt._decode_content(row[1])
+                    if '@chatroom' in talker:
+                        content = nt._strip_group_speaker(content, set(self.names) | {self.own_wxid, descriptor.get('sender', '')})
+                    return {'imageXml': content.lstrip(), 'localType': row[0]}
         finally:
             for connection in connections:
                 connection.close()
@@ -244,7 +247,7 @@ class Reader:
         if not self.image_talker_allowed(talker):
             return None
         image_id = hashlib.sha256(json.dumps([self.own_wxid, talker, payload['rawid']]).encode()).hexdigest()
-        descriptor = {'talker': talker, **payload['image'], 'account': self.account.name}
+        descriptor = {'talker': talker, **payload['image'], 'account': self.account.name, 'sender': payload['talkerId']}
         with self.lock:
             self.image_index[image_id] = descriptor
             for expired in list(self.image_index)[:-1000]:

@@ -3,6 +3,8 @@ import importlib.util
 import pathlib
 import queue
 import threading
+import hashlib
+import sqlite3
 from collections import OrderedDict
 import unittest
 
@@ -76,6 +78,19 @@ class ReaderBoundaries(unittest.TestCase):
             reader.replay_event(descriptor | {'serverId':'100'})
         with self.assertRaises(PermissionError):
             reader.replay_event(descriptor | {'conversationId':'999'})
+
+    def test_group_sticker_xml_removes_the_verified_sender_prefix(self):
+        talker='room-A@chatroom'; reader=api.Reader.__new__(api.Reader)
+        reader.names={'contact-A':'联系人A'}; reader.own_wxid='self-A'
+        reader.image_talker_allowed=lambda _:True
+        xml='<msg><emoji md5="'+'a'*32+'" /></msg>'
+        for prefix,expected in [('contact-A: '+chr(10),xml),('unknown-ID: '+chr(10),'unknown-ID: '+chr(10)+xml)]:
+            connection=sqlite3.connect(':memory:'); table='Msg_'+hashlib.md5(talker.encode()).hexdigest()
+            connection.execute('CREATE TABLE "'+table+'" (local_id INTEGER,create_time INTEGER,server_id INTEGER,local_type INTEGER,message_content TEXT)')
+            connection.execute('INSERT INTO "'+table+'" VALUES (1,12345,99,47,?)',(prefix+xml,))
+            reader.open_messages=lambda:[connection]
+            row=reader.image_row(talker,{'localId':1,'serverId':'99','createTime':12345,'localType':47})
+            self.assertEqual(row['imageXml'],expected)
 
 
 if __name__ == '__main__':

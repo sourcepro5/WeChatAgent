@@ -116,6 +116,31 @@ test('whitelisted private message enters a separate session and replies immediat
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('cooldown queues the next private reply until the exact interval without periodic replay',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'social-cooldown-'));
+  const buffer=new MessageBuffer(path.join(dir,'messages.json'));let calls=0;
+  const engine=new SocialEngine({buffer,privateMinIntervalMs:100,batchMs:10000,
+    decide:async()=>{calls++;return 'RESPOND: fixture';},send:async()=>{}});
+  try{
+    assert.throws(()=>new SocialEngine({buffer,maxPerMinute:0}),/positive integers/);
+    engine.receive({...fakeMessage('42','first'),kind:'private'});await tick(20);
+    engine.receive({...fakeMessage('42','second'),kind:'private',message_id:'second'});
+    await tick(25);assert.equal(calls,1);
+    await tick(150);assert.equal(calls,2);assert.equal(buffer.unread('wechat:private:42').length,0);
+  }finally{engine.stop();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('replay retains the direct mention from unread messages',async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'social-replay-direct-'));
+  const buffer=new MessageBuffer(path.join(dir,'messages.json'));const prompts=[];
+  const engine=new SocialEngine({buffer,batchMs:5,decide:async(_key,prompt)=>{prompts.push(prompt);return 'SILENT';},send:async()=>{}});
+  try{
+    buffer.append({...fakeMessage('group-a','fixture'),direct_mention:true});
+    engine.replay('wechat:group:group-a');await tick(40);
+    assert.equal(prompts.length,1);assert.match(prompts[0],/有人直接@你/);
+  }finally{engine.stop();fs.rmSync(dir,{recursive:true,force:true});}
+});
+
 test('native-session requests contain only unread messages and pass persona as initialization metadata', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'social-delta-'));
   const buffer = new MessageBuffer(path.join(dir, 'messages.json'));

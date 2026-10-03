@@ -22,7 +22,7 @@ if (allowedGroups.size + allowedPrivate.size === 0) console.warn('[Social] WeCha
 const log = (line) => console.log(new Date().toISOString(), line);
 const buffer = new MessageBuffer(path.resolve(root, config.message_buffer?.path ?? 'state/social-messages.json'),
   { maxPerChat: config.message_buffer?.max_messages_per_chat ?? 300 });
-const plugin = new DshPluginClient(config.dsh_plugin ?? {});
+const plugin = new DshPluginClient(config.dsh_plugin ?? {}, log);
 const adapter = new WechatOneBotAdapter({ server: { host: '127.0.0.1', ...(wechat.onebot?.server ?? {}),
   token: process.env.SOCIAL_ONEBOT_TOKEN ?? '' } }, log);
 const roleFor = (key) => {

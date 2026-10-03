@@ -22,6 +22,6 @@
     "hook:unpin": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/pin-hook-client.ps1 -Unlock",
     "hook:check": "node scripts/hook-onebot.mjs --check",
     "setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1",
-    "test": "node scripts/test-project.mjs && node --test scripts/test-image-input.mjs scripts/test-native-session.mjs scripts/test-io-migration.mjs scripts/test-hook-onebot.mjs scripts/test-sync.cjs scripts/test-reader.mjs scripts/test-dsh-plugin.mjs components/qq-bridge/scripts/test-social-bridge.mjs components/qq-bridge/scripts/test-social-e2e.mjs"
+    "test": "node scripts/test-project.mjs && node --test scripts/test-plugin-client.mjs scripts/test-image-input.mjs scripts/test-native-session.mjs scripts/test-io-migration.mjs scripts/test-hook-onebot.mjs scripts/test-sync.cjs scripts/test-reader.mjs scripts/test-dsh-plugin.mjs components/qq-bridge/scripts/test-social-bridge.mjs components/qq-bridge/scripts/test-social-e2e.mjs"
   }
 }
