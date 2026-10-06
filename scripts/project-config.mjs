@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { selectRoleText } from '../components/qq-bridge/src/role-card.js';
 import { migrateConnections } from './migrate-io-config.mjs';
+import { validateStickerSettings } from '../components/qq-bridge/src/core/sticker-policy.js';
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
@@ -13,8 +14,9 @@ const write = (file, value) => {
   fs.renameSync(`${file}.tmp`, file);
 };
 export function validateConfig(config) {
+  validateStickerSettings(config.wechat?.stickers);
   if (config.version !== 1) throw new Error('Unsupported WeChatAgent config version');
-  if (!['nt'].includes(config.runtime?.weflowMode ?? 'nt')) throw new Error('Source release supports the nt reader only');
+  if (!['nt', 'bundled', 'existing'].includes(config.runtime?.weflowMode ?? 'nt')) throw new Error('weflowMode must be nt, bundled or existing');
   if (config.runtime?.sender !== 'wechat-hook') throw new Error('sender must be wechat-hook; the UIA sender has been removed');
   if (config.runtime.sender === 'wechat-hook') {
     if ((config.runtime.weflowMode ?? 'nt') !== 'nt') throw new Error('WeChat-Hook requires the NT reader for account and receipt checks');
@@ -69,6 +71,7 @@ export function prepare(root = projectRoot) {
   write(path.join(state, 'bridge-config.json'), {
     platforms: { wechat: { enabled: true, adapter: 'wechat-onebot', onebot: { server: { host: '127.0.0.1', port: config.ports.onebot, path: '/ws', timeoutMs: 45000 } }, ...config.wechat } },
     dsh_plugin: { url: `http://127.0.0.1:${config.ports.dshPlugin}`, timeoutMs: 125000 },
+    sticker_policy_file: configFile,
     message_buffer: { path: path.join(state, 'social-messages.json'), max_messages_per_chat: 300 },
     // Original Bridge accepts inline persona text; it needs no source/path changes.
     persona_name: config.persona.default,

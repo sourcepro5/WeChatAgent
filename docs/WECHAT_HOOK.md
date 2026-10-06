@@ -2,15 +2,15 @@
 
 源码发布副本提供本项目的版本、账号、令牌检查覆盖层与 OneBot 适配器，不包含第三方 Hook 源码、DLL、微信程序或安装包。
 
-来源：[aixed/WeChat-Hook](https://github.com/aixed/WeChat-Hook)。当前匹配 Windows x64 微信 `4.1.10.27`，构建脚本要求的来源提交为 `e905d07ade50d2c6472e4eb3bd4f3fe19cf662c6`。整体授权尚未确认，使用及修改前应独立核实许可。
+来源：[aixed/WeChat-Hook](https://github.com/aixed/WeChat-Hook)。当前匹配 Windows x64 微信 `4.1.10.27`，构建脚本要求的来源提交为 `e905d07ade50d2c6472e4eb3bd4f3fe19cf662c6`。维护者已确认当前使用组件的再分发授权；源码仓库仍将原始 Hook 和客户端作为外部组件，保留本项目覆盖层及来源记录。
 
 ## 本机准备
 
 获得相应许可、独立准备源码和匹配客户端后：
 
 1. 按 `scripts/build-hook.ps1` 的要求，将获授权源码准备到 `components/WeChat-Hook`。
-2. 安装 C++ 构建工具，执行 `npm run hook:build`、`npm run hook:test-native`。
-3. 将客户端位置填入 `hook.wechatExecutable`，使用 `npm run hook:open` 打开并登录。
+2. 安装 C++ 构建工具，执行 `npm run hook:build`。
+3. 将客户端位置填入 `hook.wechatExecutable`，使用 `npm run hook:open` 打开并登录，再通过桌面“检查后台发送”或 `npm run hook:check` 核对实际后端。
 4. 数据库读取配置、账号及 DSH 插件就绪后，再启动完整项目。
 
 构建输出只保存在本机私有 `state/` 目录。目录写保护用于降低本地更新导致的版本错配，不能保证某个版本持续可登录。版本失配需真实适配及验证，不能仅修改配置版本号。

@@ -15,6 +15,7 @@ import re
 import sys
 import threading
 import time
+import uuid
 import subprocess
 import concurrent.futures
 from collections import OrderedDict
@@ -24,12 +25,16 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wechat_media import clean_account_wxid
+from wechat_forwarded import FORWARD_TYPE, parse_forwarded_record
+from wechat_sticker_send import sticker_send_fields, sticker_receipt_md5, APPMSG_STICKER_TYPE, native_gif_bytes
+from wechat_sticker import emoji_attributes, resolve_sticker_bytes
+from wechat_sticker_labels import StickerLabels, clean_label
 
 PAT_TYPE = (62 << 32) | 49
 
 
 def parse_pat(content, sender, own_wxid):
-    """Accept the observed appmsg/62 pat, bound to its sender and our account."""
+    """System pats may omit the DB sender; validate their XML actor/target."""
     if not content or len(content) > 100_000 or '<!DOCTYPE' in content.upper() or '<!ENTITY' in content.upper():
         return None
     try:
@@ -40,7 +45,7 @@ def parse_pat(content, sender, own_wxid):
             return None
         actor, target = info.findtext('fromusername', ''), info.findtext('pattedusername', '')
         own = clean_account_wxid(own_wxid)
-        if not actor or actor != sender or actor == own or target != own:
+        if not actor or (sender and actor != sender) or clean_account_wxid(actor) == own or target != own:
             return None
         return {'actor': actor, 'target': target}
     except ET.ParseError:
@@ -93,15 +98,22 @@ def conversation_id(talker, names):
 
 def push_payload(talker, message, names, own_wxid):
     sender = message.get('senderUsername', '')
-    if message.get('isSend') or not sender or sender == own_wxid:
+    if message.get('isSend'):
         return None
     kind = message.get('localType')
-    if kind not in (1, 3, 47, PAT_TYPE):
+    if kind not in (1, 3, 47, PAT_TYPE, 49, FORWARD_TYPE):
         return None
     pat = parse_pat(message.get('fullText', ''), sender, own_wxid) if kind == PAT_TYPE else None
     if kind == PAT_TYPE and not pat:
         return None
-    content = '[图片]' if kind == 3 else '[表情包：附件为静态画面或动画采样画面]' if kind == 47 else '[拍一拍] 对方刚刚拍了拍你，请自然回应。' if pat else message.get('fullText', message.get('content') or message.get('parsedContent', ''))
+    if pat:
+        sender = pat['actor']
+    if not sender or clean_account_wxid(sender) == clean_account_wxid(own_wxid):
+        return None
+    forwarded = parse_forwarded_record(message.get('fullText', '')) if kind in (49, FORWARD_TYPE) else None
+    if kind in (49, FORWARD_TYPE) and forwarded is None:
+        return None
+    content = '[图片]' if kind == 3 else '[表情包：附件为静态画面或动画采样画面]' if kind == 47 else '[拍一拍] 对方刚刚拍了拍你。' if pat else '[合并转发聊天记录] ' + forwarded['title'] if forwarded else message.get('fullText', message.get('content') or message.get('parsedContent', ''))
     if not content.strip():
         return None
     group = '@chatroom' in talker
@@ -114,6 +126,7 @@ def push_payload(talker, message, names, own_wxid):
         'senderName': names.get(sender, sender), 'talkerId': sender,
         'content': content[:4000], 'type': kind, 'timestamp': message.get('createTime', 0),
         **({'pat': pat} if pat else {}),
+        **({'forwardedRecord': forwarded} if forwarded else {}),
         **({'image': {'localId': message.get('localId'), 'serverId': message.get('serverId'),
             'createTime': message.get('createTime'), 'localType': kind}} if kind in (3, 47) else {})}
 
@@ -149,6 +162,10 @@ class Reader:
         self.image_index = read_json(self.image_index_file) if self.image_index_file.exists() else {}
         self.image_jobs = {}
         self.image_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self.sticker_jobs = {}
+        self.sticker_retry_at = {}
+        self.sticker_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self.sticker_labels = StickerLabels(self.root/'state/stickers/labels.json')
         self.image_error = ''
         self.stop = threading.Event()
         # Probe actual message shards now; listening on a port is not readiness.
@@ -195,7 +212,7 @@ class Reader:
             # Preserve complete text: the upstream CLI display truncates to 200.
             table = 'Msg_' + hashlib.md5(talker.encode()).hexdigest()
             for message in data.get('messages', []):
-                if message.get('localType') not in (1, PAT_TYPE):
+                if message.get('localType') not in (1, PAT_TYPE, 49, FORWARD_TYPE, 47, APPMSG_STICKER_TYPE):
                     continue
                 for connection in connections:
                     if table not in nt.msg_tables(connection):
@@ -206,6 +223,10 @@ class Reader:
                     if row:
                         text = nt._decode_content(row[0])
                         message['fullText'] = nt._strip_group_speaker(text, set(self.names) | {message['senderUsername']}) if '@chatroom' in talker else text
+                        md5=sticker_receipt_md5(message.get('localType'),message['fullText'])
+                        if md5:
+                            message['stickerMd5']=md5
+                            message['stickerKind']='emoji-47' if message.get('localType')==47 else 'appmsg-8'
                         break
             return data.get('messages', [])
         finally:
@@ -301,6 +322,87 @@ class Reader:
             with self.lock:
                 if future.done() and self.image_jobs.get(image_id) is future:
                     self.image_jobs.pop(image_id, None)
+
+    def sticker_candidates(self, key):
+        candidates=[]
+        for image_id, descriptor in self.image_index.items():
+            if descriptor.get('localType')!=47 or descriptor.get('account')!=self.account.name:
+                continue
+            talker=descriptor['talker']
+            current='wechat:'+('group:' if '@chatroom' in talker else 'private:')+conversation_id(talker,self.names)
+            if current==key and self.image_talker_allowed(talker):
+                candidates.append({'id':image_id,'receivedAt':descriptor['createTime']})
+        candidates=sorted(candidates,key=lambda item:item['receivedAt'],reverse=True)[:8]
+        available=[]
+        # Preparing a missing local/CDN resource must not hold up ordinary
+        # replies. Offer only prepared native GIFs; a future batch sees them.
+        for candidate in candidates:
+            with self.lock:
+                future=self.sticker_jobs.get(candidate['id'])
+                retry=future is not None and future.done() and not future.cancelled() and isinstance(future.exception(),RuntimeError) and str(future.exception()).startswith('IMAGE_') and time.monotonic()>=self.sticker_retry_at.get(candidate['id'],0)
+                if future is None or future.cancelled() or retry:
+                    future=self.sticker_executor.submit(self.resolve_sticker,candidate['id'],key)
+                    self.sticker_jobs[candidate['id']]=future
+                    self.sticker_retry_at[candidate['id']]=time.monotonic()+30
+            if future.done() and not future.cancelled() and future.exception() is None:
+                label=None
+                if hasattr(self,'sticker_labels') and self.label_cache_enabled():
+                    label=self.sticker_labels.get(self.account.name,future.result()['sourceMd5'])
+                available.append({**candidate,**(label or {})})
+        return available
+
+    def label_cache_enabled(self):
+        return read_json(self.root/'config/wechatagent.json').get('wechat',{}).get('stickers',{}).get('labelCache',True) is True
+
+    def sticker_source(self,image_id,key):
+        descriptor=self.image_index.get(image_id)
+        if not descriptor or descriptor.get('localType')!=47 or descriptor.get('account')!=self.account.name:raise PermissionError('Sticker is unavailable')
+        talker=descriptor['talker']
+        current='wechat:'+('group:' if '@chatroom' in talker else 'private:')+conversation_id(talker,self.names)
+        if current!=key or not self.image_talker_allowed(talker):raise PermissionError('Sticker conversation mismatch')
+        return sticker_send_fields(self.image_row(talker,descriptor)['imageXml'])['md5']
+
+    def labels_for(self,ids,key):
+        if not isinstance(ids,list) or len(ids)>4 or any(not isinstance(item,str) or not re.fullmatch('[a-f0-9]{64}',item) for item in ids):raise ValueError('Invalid sticker references')
+        result=[]
+        for image_id in ids:
+            md5=self.sticker_source(image_id,key)
+            label=self.sticker_labels.get(self.account.name,md5) if self.label_cache_enabled() else None
+            if label:result.append({'id':image_id,**label})
+        return result
+
+    def save_labels(self,items,key):
+        if not isinstance(items,list) or len(items)>4:raise ValueError('Invalid label batch')
+        updates=[]
+        for item in items:
+            if not isinstance(item,dict) or not isinstance(item.get('id'),str) or not re.fullmatch('[a-f0-9]{64}',item['id']):raise ValueError('Invalid label reference')
+            updates.append((self.sticker_source(item['id'],key),clean_label(item)))
+        if not self.label_cache_enabled():return {'saved':0}
+        with self.lock:self.sticker_labels.save(self.account.name,updates)
+        return {'saved':len(updates)}
+
+    def resolve_sticker(self, image_id, key):
+        descriptor=self.image_index.get(image_id)
+        if not descriptor or descriptor.get('localType')!=47 or descriptor.get('account')!=self.account.name:
+            raise PermissionError('Sticker reference is unavailable')
+        talker=descriptor['talker']
+        current='wechat:'+('group:' if '@chatroom' in talker else 'private:')+conversation_id(talker,self.names)
+        if current!=key or not self.image_talker_allowed(talker):
+            raise PermissionError('Sticker conversation mismatch')
+        row=self.image_row(talker,descriptor)
+        fields=sticker_send_fields(row['imageXml'])
+        project=read_json(self.root/'config/wechatagent.json');media=project.get('wechat',{}).get('media',{})
+        raw=resolve_sticker_bytes(self.account,row['imageXml'],allow_cdn=media.get('allowStickerCdn') is True,allow_cdn_alias=media.get('allowStickerCdnAlias') is True)
+        source_md5=fields['md5']
+        raw=native_gif_bytes(raw)
+        fields={**fields,'md5':hashlib.md5(raw).hexdigest(),'len':len(raw)}
+        extension='.gif'
+        folder=self.root/'state/stickers/outgoing';folder.mkdir(parents=True,exist_ok=True)
+        file=folder/(fields['md5']+extension)
+        if file.exists() and hashlib.md5(file.read_bytes()).hexdigest()!=fields['md5']:raise RuntimeError('STICKER_CACHE_INTEGRITY_FAILED')
+        if not file.exists():
+            temp=file.with_suffix(extension+'.'+uuid.uuid4().hex+'.tmp');temp.write_bytes(raw);temp.replace(file)
+        return {'id':image_id,'conversationKey':current,'sourceMd5':source_md5,'format':'gif','fields':fields,'path':str(file.resolve())}
 
     def poll(self):
         since = self.started_at
@@ -462,6 +564,10 @@ def serve(reader, port, token):
                         'imagesRegistered': len(reader.image_index), 'lastImageError': reader.image_error})
                 elif re.fullmatch(r'/api/v1/images/[a-f0-9]{64}', url.path):
                     self.respond(reader.resolve_image(url.path.rsplit('/', 1)[1]))
+                elif url.path == '/api/v1/stickers':
+                    self.respond({'stickers':reader.sticker_candidates(query.get('conversationKey',[''])[0])})
+                elif re.fullmatch(r'/api/v1/stickers/[a-f0-9]{64}',url.path):
+                    self.respond(reader.resolve_sticker(url.path.rsplit('/',1)[1],query.get('conversationKey',[''])[0]))
                 else:
                     self.respond({'success': False, 'error': 'Not found'}, 404)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -475,6 +581,19 @@ def serve(reader, port, token):
             supplied = self.headers.get('Authorization', '').removeprefix('Bearer ')
             if not token or not hmac.compare_digest(supplied, token):
                 self.respond({'success': False, 'error': 'Unauthorized'}, 401)
+                return
+            if self.path == '/api/v1/stickers/labels':
+                try:
+                    size=int(self.headers.get('Content-Length','0'))
+                    if not 0<size<=8192:raise ValueError()
+                    body=json.loads(self.rfile.read(size))
+                    key=body.get('conversationKey','')
+                    result=reader.labels_for(body.get('ids'),key) if body.get('operation')=='read' else reader.save_labels(body.get('labels'),key) if body.get('operation')=='save' else None
+                    if result is None:raise ValueError()
+                    self.respond({'labels':result} if isinstance(result,list) else result)
+                except PermissionError:self.respond({'error':'Sticker conversation mismatch'},403)
+                except ValueError:self.respond({'error':'Invalid sticker labels'},400)
+                except Exception:self.respond({'error':'Sticker labels unavailable'},503)
                 return
             if self.path == '/api/v1/events/retry':
                 try:
@@ -508,6 +627,7 @@ def serve(reader, port, token):
         server.serve_forever()
     finally:
         reader.stop.set()
+        reader.sticker_executor.shutdown(wait=False,cancel_futures=True)
         server.server_close()
 
 

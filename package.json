@@ -1,12 +1,19 @@
 {
   "name": "wechatagent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Personal WeChat AI friend with NT reader, WeChat-Hook, OneBot v11 and an existing DSH Desktop",
   "license": "SEE LICENSES.md",
-  "engines": { "node": ">=22.13.0" },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
+    "console": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/launch-desktop.ps1",
+    "desktop:build": "node scripts/build-desktop.mjs",
+    "installer:runtime": "node scripts/prepare-installer-runtime.mjs",
+    "installer:build": "node scripts/build-installer.mjs",
+    "console:web": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/launch-console.ps1",
     "start": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/manage.ps1 start",
     "stop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/manage.ps1 stop",
     "restart": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/manage.ps1 restart",
@@ -16,12 +23,18 @@
     "sessions:compact": "node scripts/manage-dsh-sessions.mjs compact",
     "sessions:status": "node scripts/manage-dsh-sessions.mjs status",
     "hook:build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-hook.ps1",
-    "hook:test-native": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test-native-hook.ps1",
     "hook:open": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/launch-hook-wechat.ps1",
     "hook:pin": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/pin-hook-client.ps1",
     "hook:unpin": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/pin-hook-client.ps1 -Unlock",
     "hook:check": "node scripts/hook-onebot.mjs --check",
     "setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1",
-    "test": "node scripts/test-project.mjs && node --test scripts/test-plugin-client.mjs scripts/test-image-input.mjs scripts/test-native-session.mjs scripts/test-io-migration.mjs scripts/test-hook-onebot.mjs scripts/test-sync.cjs scripts/test-reader.mjs scripts/test-dsh-plugin.mjs components/qq-bridge/scripts/test-social-bridge.mjs components/qq-bridge/scripts/test-social-e2e.mjs"
+    "privacy:check": "node scripts/public-source-check.mjs"
+  },
+  "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "7zip-bin": "5.2.0",
+    "electron": "41.1.1",
+    "electron-builder": "26.8.1",
+    "sharp": "0.34.5"
   }
 }

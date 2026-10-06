@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>WeChatAgent · 控制台</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/console.css">
+  <script src="/console.js" defer></script>
+</head>
+<body>
+  <a href="#content" class="skip-link">跳到内容</a>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><img src="/favicon.svg" alt="" width="34" height="34"><div><strong>WeChatAgent</strong><span>本机控制台</span></div></div>
+    <div class="nav-caption">工作空间</div>
+    <nav aria-label="主导航">
+      <a href="#setup" data-page="setup" id="setup-nav" hidden><svg><use href="/icons.svg#plug"></use></svg><span>首次配置</span></a>
+      <a href="#overview" data-page="overview"><svg><use href="/icons.svg#dashboard"></use></svg><span>概览</span></a>
+      <a href="#chats" data-page="chats"><svg><use href="/icons.svg#users"></use></svg><span>聊天范围</span><span class="nav-count" id="nav-chat-count">—</span></a>
+      <a href="#roles" data-page="roles"><svg><use href="/icons.svg#person"></use></svg><span>人格</span></a>
+      <a href="#sessions" data-page="sessions"><svg><use href="/icons.svg#history"></use></svg><span>会话</span></a>
+      <div class="nav-caption">管理</div>
+      <a href="#behavior" data-page="behavior"><svg><use href="/icons.svg#sliders"></use></svg><span>回复设置</span></a>
+      <a href="#connections" data-page="connections"><svg><use href="/icons.svg#plug"></use></svg><span>连接设置</span></a>
+      <a href="#logs" data-page="logs"><svg><use href="/icons.svg#log"></use></svg><span>运行日志</span></a>
+      <a href="#tools" data-page="tools"><svg><use href="/icons.svg#tool"></use></svg><span>工具</span></a>
+    </nav>
+    <div class="sidebar-bottom"><div class="local-label"><svg><use href="/icons.svg#shield"></use></svg><span>仅在本机访问</span></div><span class="version">WeChatAgent / 0.2.0</span><button class="link-button quit-console" id="quit-console">退出控制台</button></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div class="breadcrumb"><button class="icon-button mobile-menu" id="menu-button" aria-label="打开导航"><svg><use href="/icons.svg#menu"></use></svg></button><span>控制台</span><span class="separator">/</span><strong id="breadcrumb-page">概览</strong></div><div class="topbar-actions"><span class="connection-label" id="connection-label"><i class="dot"></i>连接中</span><button class="icon-button" id="activity-button" aria-label="查看上次操作结果" title="查看操作结果" hidden><svg><use href="/icons.svg#history"></use></svg></button><button class="icon-button" id="theme-button" aria-label="切换深色主题" title="切换主题"><svg><use href="/icons.svg#moon"></use></svg></button><button class="icon-button" id="refresh-button" aria-label="刷新当前页面" title="刷新"><svg><use href="/icons.svg#refresh"></use></svg></button></div></header>
+    <main id="content" tabindex="-1">
+      <div id="connection-error" class="notice error-notice" hidden role="alert"></div>
+      <div class="page-heading"><div><h1 id="page-title">概览</h1><p id="page-description">微信助手的运行情况，一眼看清。</p></div><span class="subtle" id="updated-label"></span></div>
+      <div id="pending-banner" class="notice" hidden><svg><use href="/icons.svg#info"></use></svg><span id="pending-message">设置已保存，重启服务后生效。</span><button class="button small" data-action="restart">重启并应用</button></div>
+      <div id="setup-banner" class="notice" hidden><svg><use href="/icons.svg#info"></use></svg><span>运行环境已内置，请完成自己账号的首次配置。</span><a class="button small" href="#setup">开始配置</a></div>
+      <div id="page-body"><div class="loading-state">正在连接本机控制台…</div></div>
+    </main>
+    <div class="save-bar" id="save-bar" hidden><div><strong>有未保存的设置</strong><span>表情开关保存后立即生效，其他设置需重启服务。</span></div><div class="button-row"><button class="button" id="discard-button">放弃更改</button><button class="button primary" id="save-button">保存设置</button></div></div>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"><div class="modal-header"><h2 id="modal-title"></h2><button class="icon-button" id="modal-close" aria-label="关闭窗口"><svg><use href="/icons.svg#close"></use></svg></button></div><div id="modal-content"></div></dialog>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <section class="job-panel" id="job-panel" hidden aria-label="操作进度"><div class="job-header"><div><i id="job-dot" class="dot"></i><strong id="job-title">正在操作</strong></div><button class="icon-button" id="job-close" aria-label="收起操作进度"><svg><use href="/icons.svg#close"></use></svg></button></div><p id="job-description"></p><pre id="job-output" tabindex="0"></pre><div class="job-footer"><span id="job-state"></span><button class="button small" id="job-retry" hidden>重试</button></div></section>
+</body>
+</html>

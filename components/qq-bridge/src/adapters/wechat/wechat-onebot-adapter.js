@@ -65,6 +65,19 @@ export class WechatOneBotAdapter extends BaseAdapter {
     this.recentOutgoing.set(this.#fingerprint(kind, id, content), Date.now() + this.antiLoopTtlMs);
     this.stats.sends++; return { accepted: true, response: result, delivered: 'database-confirmed' };
   }
+  async stickerChoices({kind,target}){
+    const result=await this.server.action('get_sticker_list',{kind,target:String(target)});
+    return result.data?.enabled?(result.data.stickers??[]):[];
+  }
+  async sendSticker({kind,target,id}){
+    if(!['private','group'].includes(kind)||!/^[a-f0-9]{64}$/.test(id))throw new TypeError('invalid sticker target');
+    const result=await this.server.action(kind==='group'?'send_group_msg':'send_private_msg',{
+      [kind==='group'?'group_id':'user_id']:Number(target),message:[{type:'wechat_sticker',data:{id}}]});
+    if(result.data?.receipt!=='wechat-server-id'||result.data?.media_type!=='wechat-sticker')throw new Error('Sticker send has no server receipt');
+    this.stats.sends++;return result;
+  }
+  async stickerLabels({kind,target,ids}){return (await this.server.action('get_sticker_labels',{kind,target:String(target),ids})).data?.labels??[];}
+  async saveStickerLabels({kind,target,labels}){return this.server.action('save_sticker_labels',{kind,target:String(target),labels});}
   async sendPrivateMessage(target, text) { return this.sendText({ kind: 'private', target, text }); }
   async sendGroupMessage(target, text) { return this.sendText({ kind: 'group', target, text }); }
   async reply() { throw new Error('unsupported_capability: nativeReply'); }

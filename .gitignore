@@ -18,11 +18,9 @@
 /components/qq-bridge/config.social.json.*
 /components/qq-bridge/state/
 
-# 本机自定义人格在公开授权与隐私核验后再另行发布
-# 首次安装使用可提交的 roles/示例助手.md
-/roles/*.md
-!/roles/README.md
-!/roles/示例助手.md
+# 已授权人格作为公开预设保留
+# 首次选择示例助手，其余预设可在桌面切换
+
 
 # 环境凭据；示例环境文件可提交
 .env
@@ -107,3 +105,14 @@ Thumbs.db
 *.db
 *.db-wal
 *.db-shm
+
+# Authorized preset files are source; generated programs and audit caches are local.
+/release/
+/WeChatAgent.exe
+/audit-local/
+/privacy-rules.json
+*.sqlite
+*.sqlite3
+*.pfx
+*.pem
+*.key

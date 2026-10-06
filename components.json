@@ -1,6 +1,6 @@
 {
   "project": "WeChatAgent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "distribution": "source-only",
   "components": [
     {
@@ -10,7 +10,7 @@
       "version": "0.1.7",
       "license": "MIT",
       "modified": true,
-      "notes": "Default WeChat social modules and tests only; see component README."
+      "notes": "Default WeChat social modules  only; see component README."
     },
     {
       "name": "NT database reader subset",
@@ -25,8 +25,14 @@
     {
       "name": "DSH Social Plugin",
       "directory": "packages/dsh-social-bridge-plugin",
-      "sdk": "@deepseek-ai/dsh-llm@0.1.7-rc.2",
+      "sdk": "@deepseek-ai/dsh-llm@0.2.0-rc.2",
       "notes": "Source and lock file only; dependencies installed separately."
+    },
+    {
+      "name": "WeChatAgent Desktop",
+      "directory": "apps/console-desktop",
+      "version": "0.2.0",
+      "notes": "Independent build dependencies are pinned in the root package; no historical WeFlow tree required."
     }
   ],
   "externalComponents": [
@@ -54,5 +60,13 @@
       "distributed": false,
       "notes": "Independently acquired under their own terms."
     }
-  ]
+  ],
+  "presets": [
+    "傲娇助手",
+    "小鲸鱼",
+    "德克萨斯",
+    "洛奇希",
+    "示例助手"
+  ],
+  "redistributionAuthorization": "Maintainer confirmed authorization to redistribute all currently used components. Public source excludes vendor binaries and third-party Hook source; own additions do not replace upstream licenses."
 }

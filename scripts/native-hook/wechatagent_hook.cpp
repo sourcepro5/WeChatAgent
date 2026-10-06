@@ -8,13 +8,72 @@
 #include <mutex>
 #include <set>
 #include <vector>
+#include <regex>
+#include <sstream>
+#include <bcrypt.h>
+#pragma comment(lib,"bcrypt.lib")
 #include "httplib.h"
 #include "json.hpp"
 #include "wx_send.h"
+#include "sticker_sender.h"
+#include "global.h"
 #include "wechatagent_hook.h"
 
 using json = nlohmann::json;
 static std::timed_mutex sendMutex;
+
+static bool StickerReady() {
+    auto module=GetModuleHandleW(L"Weixin.dll");
+    if(!module)return false;
+    auto base=reinterpret_cast<uintptr_t>(module);
+    const auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS64*>(base+dos->e_lfanew);
+    auto inCode=[base,pe](uintptr_t address){
+        if(address<base || address>=base+pe->OptionalHeader.SizeOfImage)return false;
+        MEMORY_BASIC_INFORMATION info{};
+        if(!VirtualQuery(reinterpret_cast<void*>(address),&info,sizeof(info)) || info.State!=MEM_COMMIT)return false;
+        return (info.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY))!=0;
+    };
+    if(!inCode(base+offset::send_message) || !inCode(base+offset::create_param2) ||
+      !inCode(base+WeChatAgentSticker::EmojiFactory))return false;
+    const uintptr_t tables[]={WeChatAgentSticker::EmojiOwnerVtable,WeChatAgentSticker::EmojiVtable,offset::param1_vtable,
+      offset::param2_1,offset::param2_2,offset::param2_3};
+    for(auto offset:tables){
+        if(offset+sizeof(uintptr_t)>pe->OptionalHeader.SizeOfImage)return false;
+        MEMORY_BASIC_INFORMATION info{};
+        if(!VirtualQuery(reinterpret_cast<void*>(base+offset),&info,sizeof(info)) || info.State!=MEM_COMMIT ||
+          (info.Protect&(PAGE_NOACCESS|PAGE_GUARD)))return false;
+        if(!inCode(*reinterpret_cast<const uintptr_t*>(base+offset)))return false;
+    }
+    return true;
+}
+
+static bool ForwardSticker(const std::string& target,const std::string& path) {
+    __try { return WeixinSend::SendStickerFile(target,path); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+static bool StickerFileMatches(const std::filesystem::path& path,const std::string& md5) {
+    std::ifstream input(path,std::ios::binary);
+    if(!input)return false;
+    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(input)),{});
+    if(bytes.empty() || bytes.size()>8*1024*1024)return false;
+    bool media=(bytes.size()>=6 && (!memcmp(bytes.data(),"GIF87a",6)||!memcmp(bytes.data(),"GIF89a",6))) ||
+      (bytes.size()>=8 && !memcmp(bytes.data(),"\x89PNG\r\n\x1a\n",8)) ||
+      (bytes.size()>=12 && !memcmp(bytes.data(),"RIFF",4)&&!memcmp(bytes.data()+8,"WEBP",4)) ||
+      (bytes.size()>=3 && bytes[0]==0xff && bytes[1]==0xd8 && bytes[2]==0xff) ||
+      (bytes.size()>=4 && !memcmp(bytes.data(),"wxgf",4));
+    if(!media)return false;
+    BCRYPT_ALG_HANDLE algorithm=nullptr;
+    if(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_MD5_ALGORITHM,nullptr,0)<0)return false;
+    unsigned char digest[16]{};
+    auto result=BCryptHash(algorithm,nullptr,0,bytes.data(),static_cast<ULONG>(bytes.size()),digest,16);
+    BCryptCloseAlgorithmProvider(algorithm,0);
+    if(result<0)return false;
+    static constexpr char hex[]="0123456789abcdef";std::string actual;
+    for(auto value:digest){actual+=hex[value>>4];actual+=hex[value&15];}
+    return actual==md5;
+}
 
 static std::string Utf8(const std::wstring& value) {
     int size = WideCharToMultiByte(CP_UTF8, 0, value.data(), (int)value.size(), nullptr, 0, nullptr, nullptr);
@@ -107,8 +166,56 @@ void RegisterWeChatAgentRoutes(httplib::Server& server) {
     server.Get("/WeChatAgent/health", [authorized](const httplib::Request& req, httplib::Response& res) {
         if (!authorized(req, res)) return;
         json data = {{"backend", "wechat-hook"}, {"integration", "WeChatAgent-1"},
-            {"version", CoreVersion()}, {"pid", GetCurrentProcessId()}, {"databaseAccounts", DatabaseAccounts()}};
+            {"version", CoreVersion()}, {"pid", GetCurrentProcessId()}, {"databaseAccounts", DatabaseAccounts()}, {"nativeStickerSend",StickerReady()}};
         res.set_content(data.dump(), "application/json");
+    });
+    server.Post("/SendStickerMsg",[authorized](const httplib::Request& req,httplib::Response& res){
+        if(!authorized(req,res))return;
+        try{
+            auto accounts=DatabaseAccounts();auto account=req.get_header_value("X-WeChatAgent-Account");
+            if(CoreVersion()!="4.1.10.27" || accounts.size()!=1 || !accounts.count(account)){
+                res.status=409;res.set_content("{\"ret\":1,\"error\":\"Version or account mismatch\"}","application/json");return;
+            }
+            if(!StickerReady()){
+                res.status=409;res.set_content("{\"ret\":1,\"error\":\"Sticker native layout unavailable\"}","application/json");return;
+            }
+            auto data=json::parse(req.body);auto target=data.value("wxidorgid","");auto fields=data.at("sticker");
+            std::string file=data.value("path","");
+            std::string md5=fields.value("md5",""),product=fields.value("productid","");
+            int length=fields.value("len",0),type=fields.value("type",0),width=fields.value("width",0),height=fields.value("height",0);
+            if(target.empty() || target.size()>256 || !std::regex_match(md5,std::regex("[a-f0-9]{32}")) ||
+              !std::regex_match(product,std::regex("[A-Za-z0-9._-]{0,128}")) || length<0 || length>8*1024*1024 ||
+              type<0 || type>5 || width<0 || width>4096 || height<0 || height>4096){
+                res.status=400;res.set_content("{\"ret\":1,\"error\":\"Invalid sticker metadata\"}","application/json");return;
+            }
+            auto allowed=std::filesystem::weakly_canonical(std::filesystem::path(ModulePath()).parent_path().parent_path().parent_path().parent_path()/L"state"/L"stickers"/L"outgoing");
+            auto image=std::filesystem::weakly_canonical(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(file.data()),file.size())));
+            auto extension=image.extension().string();
+            if(image.parent_path()!=allowed || image.stem().string()!=md5 ||
+              !(extension==".gif"||extension==".png"||extension==".wxgf"||extension==".webp"||extension==".jpg") ||
+              !std::filesystem::is_regular_file(image) || std::filesystem::file_size(image)>8*1024*1024 || !StickerFileMatches(image,md5)){
+                res.status=400;res.set_content("{\"ret\":1,\"error\":\"Invalid sticker file\"}","application/json");return;
+            }
+            std::unique_lock<std::timed_mutex> lock(sendMutex,std::defer_lock);
+            if(!lock.try_lock_for(std::chrono::seconds(1))){res.status=429;res.set_content("{\"ret\":1}","application/json");return;}
+            bool accepted=ForwardSticker(target,file);
+            res.set_content(accepted?"{\"ret\":0,\"retmsg\":\"accepted\"}":"{\"ret\":1,\"error\":\"Native sticker rejected\"}","application/json");
+        }catch(...){res.status=400;res.set_content("{\"ret\":1,\"error\":\"Invalid sticker request\"}","application/json");}
+    });
+    server.Post("/WeChatAgent/sticker-trace",[authorized](const httplib::Request& req,httplib::Response& res){
+        if(!authorized(req,res))return;
+        auto accounts=DatabaseAccounts();auto account=req.get_header_value("X-WeChatAgent-Account");
+        if(CoreVersion()!="4.1.10.27" || accounts.size()!=1 || !accounts.count(account)){res.status=409;res.set_content("{}","application/json");return;}
+        try {
+            auto data=json::parse(req.body);auto target=data.value("wxidorgid","");
+            if(target.size()>256){res.status=400;res.set_content("{}","application/json");return;}
+            if(!WeChatAgentSticker::StartTrace(target)){res.status=503;res.set_content("{}","application/json");return;}
+            res.set_content(WeChatAgentSticker::TraceJson(),"application/json");
+        }catch(...){res.status=400;res.set_content("{}","application/json");}
+    });
+    server.Get("/WeChatAgent/sticker-trace",[authorized](const httplib::Request& req,httplib::Response& res){
+        if(!authorized(req,res))return;
+        res.set_content(WeChatAgentSticker::TraceJson(),"application/json");
     });
     server.Post("/SendTextMsg", [authorized](const httplib::Request& req, httplib::Response& res) {
         if (!authorized(req, res)) return;

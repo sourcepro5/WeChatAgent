@@ -13,7 +13,6 @@
     "url": "https://github.com/Derpyu520/qq-bridge"
   },
   "scripts": {
-    "start:social": "node src/social-bridge.js",
-    "test:social": "node --test scripts/test-social-bridge.mjs scripts/test-social-e2e.mjs"
+    "start:social": "node src/social-bridge.js"
   }
 }

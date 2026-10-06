@@ -143,7 +143,7 @@ def decode_wxgf(raw):
         return output.getvalue()
 
 
-def resolve_sticker(account, content, normalize, allow_cdn=False, allow_cdn_alias=False):
+def resolve_sticker_bytes(account, content, allow_cdn=False, allow_cdn_alias=False):
     attrs = emoji_attributes(content)
     md5, key = attrs['md5'], attrs.get('aeskey', '')
     account = pathlib.Path(account).resolve()
@@ -151,7 +151,7 @@ def resolve_sticker(account, content, normalize, allow_cdn=False, allow_cdn_alia
         for candidate in plain_candidates(raw, key):
             if hashlib.md5(candidate).hexdigest() != md5:
                 continue
-            return normalize(decode_wxgf(candidate), animated=True)
+            return candidate
         return None
     bases = [account / 'business' / 'emoticon' / n for n in ('Persist', 'Thumb', 'Temp')]
     cache = account / 'cache'
@@ -178,3 +178,8 @@ def resolve_sticker(account, content, normalize, allow_cdn=False, allow_cdn_alia
         except RuntimeError as failure:
             error = str(failure)
     raise RuntimeError(error)
+
+
+def resolve_sticker(account, content, normalize, allow_cdn=False, allow_cdn_alias=False):
+    raw=resolve_sticker_bytes(account,content,allow_cdn=allow_cdn,allow_cdn_alias=allow_cdn_alias)
+    return normalize(decode_wxgf(raw),animated=True)

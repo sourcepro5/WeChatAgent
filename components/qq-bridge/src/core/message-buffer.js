@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { buildConversationKey } from './conversation-key.js';
+import { normalizeForwardedRecord } from './wechat-events.js';
 
 /** Small persistent recent-message buffer. Corrupt files fail closed and are never overwritten. */
 export class MessageBuffer {
@@ -28,6 +29,9 @@ export class MessageBuffer {
       text: String(message.text ?? '').slice(0, 4000), timestamp: Number(message.timestamp) || Date.now() / 1000,
       images: outgoing ? [] : (message.images ?? []).filter(image => /^[a-f0-9]{64}$/.test(image?.id ?? '')).slice(0,4),
       direct_mention: Boolean(message.direct_mention), outgoing, processed: outgoing };
+    if(!outgoing && message.interaction==='pat')row.interaction='pat';
+    const record=!outgoing && normalizeForwardedRecord(message.forwardedRecord);
+    if(record)row.forwardedRecord=record;
     const rows = this.chats.get(key) ?? [];
     rows.push(row);
     if (rows.length > this.maxPerChat) rows.splice(0, rows.length - this.maxPerChat);

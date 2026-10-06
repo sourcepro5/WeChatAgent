@@ -23,7 +23,7 @@ Read this file and [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md) before changin
 
 ## Verification
 
-Run the narrowest relevant check first. TypeScript changes require `npm run build`; run `npm test` for the regression suite. For Python changes, compile or run the affected script's focused check. Before handoff, run `git diff --check` and inspect the staged diff for sensitive information.
+This published directory is a database-only Python subset and does not include the upstream development test suite or TypeScript build. For Python changes, compile the affected runtime scripts and verify their caller-provided-input contracts in the maintainer workspace. Before handoff, run `git diff --check`, the root privacy check, and inspect the staged diff for sensitive information.
 
 ## Documentation Protocol
 

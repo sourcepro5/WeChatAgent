@@ -19,7 +19,7 @@ function Install-Npm([string]$Directory,[bool]$Legacy) {
 Install-Npm (Join-Path $root 'packages\dsh-social-bridge-plugin') $false
 & $python -m pip install --only-binary=:all: -r (Join-Path $PSScriptRoot 'reader-requirements.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Independent reader dependency installation failed.' }
-if ($BuildOriginalWeFlow) { throw 'The source release does not bundle WeFlow Desktop; obtain its source and resources separately under their applicable terms.' }
+if ($BuildOriginalWeFlow) { throw 'The public source does not include historical WeFlow Desktop. Use the independent desktop build dependencies.' }
 if ($IncludeQqDependencies) { Install-Npm (Join-Path $root 'components\qq-bridge') $false }
 & $python -m pip check
 if ($LASTEXITCODE -ne 0) { throw 'Python dependency conflicts detected.' }
