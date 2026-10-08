@@ -61,7 +61,13 @@ function Start-ServiceProcess([string]$Name,[string]$Exe,[string]$Arguments,[str
     $process = Start-Process -FilePath $Exe -ArgumentList $Arguments -WorkingDirectory $Directory -WindowStyle $style -PassThru -RedirectStandardOutput (Join-Path $stateDir ('logs\'+$Name+'.stdout.log')) -RedirectStandardError (Join-Path $stateDir ('logs\'+$Name+'.stderr.log'))
     $script:record[$Name] = @{pid=$process.Id;exe=$Exe;marker=$Marker}; Save-Record
     for ($i=0;$i -lt 80 -and -not (Test-Port $Port);$i++) {
-        if ($process.HasExited) { throw ($Name + ' exited; see state/logs/'+$Name+'.stderr.log') }
+        if ($process.HasExited) {
+            $failureLog = Join-Path $stateDir ('logs\'+$Name+'.stderr.log')
+            if (Test-Path -LiteralPath $failureLog) {
+                Get-Content -LiteralPath $failureLog -Encoding UTF8 -Tail 30 | ForEach-Object { Write-Output $_ }
+            }
+            throw ($Name + ' exited; see state/logs/'+$Name+'.stderr.log')
+        }
         Start-Sleep -Milliseconds 250
     }
     if (-not (Test-Port $Port)) { throw ($Name + ' API not ready. Finish its setup in the opened window, then start again.') }

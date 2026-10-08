@@ -1,19 +1,21 @@
-# WeChatAgent 0.2.0
+# WeChatAgent 0.2.1
 
 Windows 微信助手与独立桌面控制台。支持白名单好友／群聊、人格预设、独立 DSH 会话、上下文压缩、图片理解、原生文字及表情包发送。
 
 ## 安装使用
 
-普通用户使用 GitHub Releases 附件中的 `WeChatAgent-Setup-0.2.0-x64.exe`。安装后通过“首次配置”登录自己的微信和 DSH、填写有效读取凭据、选择聊天范围，日常操作无需命令行。首次白名单为空。安装器需由维护者上传至 Releases；本源码目录不包含它。
+普通用户使用 GitHub Releases 附件中的 `WeChatAgent-Setup-0.2.1-x64.exe`。安装后通过“首次配置”登录自己的微信和 DSH、自动查找账号并连接验证数据库、选择聊天范围，日常操作无需命令行。首次白名单为空。安装器需由维护者上传至 Releases；本源码目录不包含它。
 
 用户数据位于当前用户 AppData 下的 WeChatAgent 工作区。升级保留配置、人格编辑和私有状态；卸载保留用户数据。维护者的账号、密钥、联系人、聊天和运行日志未包含在源码中。
 
 ## 版本与预设
 
-- WeChatAgent：0.2.0；DSH 桌面端和插件 SDK 实际验收版本：`0.2.0-rc.2`。
+- WeChatAgent：0.2.1；DSH 桌面端和插件 SDK 实际验收版本：`0.2.0-rc.2`。
 - 匹配微信：Windows x64 `4.1.10.27`；版本可登录性需按实际账号和环境验证。
 - 内置预设：傲娇助手、德克萨斯、洛奇希、示例助手、小鲸鱼。首次选中示例助手，可在桌面应用切换。
 - 支持人格稳定复用、归档后创建新会话、图片完成后卸载输入、按聊天控制表情发送和标签缓存。
+- 首次配置自动识别账号目录、获取并验证读取密钥，验证通过才安全保存；失败显示恢复步骤，保留原配置。
+- 支持人格 Markdown 导入、接收引用消息、按需联网搜索、逐聊天主动聊天与自动上下文压缩；联网及主动聊天默认关闭。
 - 当前未提供主动拍回、文件发送、语音／视频理解或通用新版微信适配。
 
 ## 源码与构建
@@ -27,9 +29,9 @@ python -m pip install -r scripts/reader-requirements.txt
 npm run desktop:build
 ```
 
-构建完成后双击根目录 WeChatAgent.exe 或 WeChatAgent-Console.vbs。源码副本不包含微信、DSH、第三方 Hook、已编译原生库或任何运行环境，完整收发需独立准备相应组件。外部组件说明见 [发送后端](docs/WECHAT_HOOK.md)。
+构建完成后双击根目录 WeChatAgent.exe 或 WeChatAgent-Console.vbs。源码副本不包含微信、DSH、第三方 Hook、已编译原生库或任何运行环境，完整收发需独立准备相应组件。外部组件说明见 [发送后端](docs/WECHAT_HOOK.md)。源码模式的自动连接需另行准备已授权的 wx_key.dll，放到 components/weflow-cli/resources/key/win32/x64/；安装器会内置该组件，普通用户无需手动准备。
 
-安装器构建需要已获授权的微信客户端、Hook 编译产物及 DSH 程序。准备到本机私有 state/hook 目录，设置 DSH 程序目录后构建；每次均校验 DSH 与 SDK 版本匹配。
+安装器构建需要已获授权的微信客户端、Hook 编译产物及 DSH 程序。准备到本机私有 state/hook 目录，设置 DSH 程序目录后构建；每次均校验 DSH 与 SDK 版本匹配，并按根 package.json 中的版本号生成安装器。
 
 ```powershell
 $env:WECHATAGENT_DSH_SOURCE = '<DSH program directory>'
@@ -66,7 +68,7 @@ npm run privacy:check
 
 原作者署名和各组件许可保留，见 [LICENSES.md](LICENSES.md) 与 [components.json](components.json)。维护者已确认当前使用组件的再分发授权；这不将第三方程序、代码或角色素材重新许可为 MIT，也不表示微信或 DeepSeek 的官方背书。
 
-源码与安装器分开发布：仓库提交本目录源码，Releases 附加安装器、SHA256SUMS.txt 和验证记录。安装、启动、升级及卸载验收使用维护者 Windows 11 的隔离目录，不替代其他电脑或账号的实际登录与收发验证。
+源码与安装器分开发布：仓库提交本目录源码，Releases 附加安装器、SHA256SUMS.txt 和验证记录。推送与发布命令见 [GitHub 发布步骤](docs/GITHUB_PUBLISHING.md)。安装、启动、升级及卸载验收使用维护者 Windows 11 的隔离目录，不替代其他电脑或账号的实际登录与收发验证。
 
 ## 免责声明
 

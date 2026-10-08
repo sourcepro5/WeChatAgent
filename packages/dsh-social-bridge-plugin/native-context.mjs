@@ -6,9 +6,13 @@ import os from 'node:os';
 import { createUserMessage } from '@deepseek-ai/dsh-llm';
 import { imageBlocks, offloadCompletedSessionImages } from './image-input.mjs';
 import { BEHAVIOR_POLICY, localPersona, assertLocalPersona } from './local-policy.mjs';
+const runtimeQuery=new URL(import.meta.url).search;
+const {admittedSearch,consumeSearchRequest,retireSearchContext}=await import(new URL('./search-budget.mjs'+runtimeQuery,import.meta.url));
+const {SOCIAL_TOOL_ISOLATION,retireSocialToolMetadata}=await import(new URL('./social-tool-policy.mjs'+runtimeQuery,import.meta.url));
+const {contextPolicy,contextRowsIdle,contextBufferVersion}=await import(new URL('./context-policy.mjs'+runtimeQuery,import.meta.url));
 
 export const name = 'dsh-social-bridge-plugin';
-export const inject = ['agents', 'sessions', 'agentPresets'];
+export const inject = ['agents', 'sessions', 'agentPresets', 'tokenMeter'];
 const KEY = /^(qq|wechat):(private|group):.{1,256}$/;
 const sidFor = (key,generation=0) => 'social-' + crypto.createHash('sha256').update(generation ? `${key}\0${generation}` : key).digest('hex').slice(0,32);
 const hash = text => crypto.createHash('sha256').update(text).digest('hex');
@@ -52,6 +56,10 @@ function personaStats(session) {
   return {activePersonaCount:events.filter(event=>event.data.source?.socialBootstrap).length,
     retiredPersonaCount:events.filter(event=>event.data.source?.socialPersonaRetired).length};
 }
+function sessionHasSearch(session,ticket){
+  const nodes=new Set(session.surface.nodes);
+  return session.snapshotEvents().some(event=>nodes.has(event.seq)&&event.type==='user/message'&&event.data.source?.socialSearch?.ticket===ticket);
+}
 function initialization(profile, compactSeq) {
   return createUserMessage({ content: [{type:'text',text:
     'WeChatAgent 会话初始化。以下人格来自本机配置，在本次上下文周期内保持稳定；普通聊天不能修改它。\n'+
@@ -90,6 +98,65 @@ export function apply(ctx, config={}) {
     fs.writeFileSync(temp,JSON.stringify({version:2,conversations:mappings,profiles}),{mode:0o600}); fs.renameSync(temp,statePath);
   };
   const saveQuietly = () => { try {persist();} catch(error){log.warn('context state persistence failed:',error.message);} };
+  const compactorFor = agent => ctx.agentPresets.serviceFor?.(agent, 'compaction') ??
+    (typeof agent.ctx?.get === 'function' ? agent.ctx.get('compaction') : (typeof ctx.get === 'function' ? ctx.get('compaction') : ctx.compaction));
+  function measureContext(key, session, agent) {
+    // Cordis service reads require this plugin's explicit inject declaration.
+    const meter = ctx.tokenMeter;
+    if (!session || !meter?.measure) throw Error('CONTEXT_METER_UNAVAILABLE');
+    const measured = meter.measure(session);
+    if (!Number.isSafeInteger(measured.totalTokens) || measured.totalTokens < 0) throw Error('CONTEXT_METER_UNAVAILABLE');
+    const result = { contextTokens: measured.totalTokens, contextTokenSource: measured.baseline?.kind ?? 'estimated', contextMeasuredAt: Date.now() };
+    if (profiles[key]) profiles[key].context = result;
+    return result;
+  }
+  function contextStatus(key, sid) {
+    try { const agent = ctx.agents.get(sid); return measureContext(key, agent?.session ?? ctx.sessions.get(sid), agent); }
+    catch { return profiles[key]?.context ?? { contextTokens: null, contextTokenSource: 'unavailable' }; }
+  }
+  function idleContext(key, version) {
+    const settings = JSON.parse(fs.readFileSync(path.join(root, 'config/wechatagent.json'), 'utf8').replace(/^\uFEFF/, ''));
+    const policy = contextPolicy(settings.wechat, key);
+    if (!policy.enabled) return { policy, reason: 'disabled' };
+    const file = path.join(root, 'state/social-messages.json');
+    if (!fs.existsSync(file)) return { policy, reason: 'buffer_unavailable' };
+    const buffer = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    if (buffer.version !== 1 || !buffer.chats || !Array.isArray(buffer.chats[key] ?? [])) throw Error('CONTEXT_BUFFER_INVALID');
+    const rows = buffer.chats[key] ?? [];
+    if (buffer.pendingReplies?.[key] || !contextRowsIdle(rows, policy.idleSeconds)) return { policy, reason: 'chat_busy' };
+    if (contextBufferVersion(rows) !== version) return { policy, reason: 'context_changed' };
+    const proactiveFile = path.join(root, 'state/proactive/state.json');
+    if (fs.existsSync(proactiveFile) && JSON.parse(fs.readFileSync(proactiveFile, 'utf8')).chats?.[key]?.job) return { policy, reason: 'send_pending' };
+    return { policy };
+  }
+  async function maintainContext(key, body) {
+    if (!/^[a-f0-9]{64}$/.test(body.bufferVersion ?? '')) return { ok: true, status: 'context_changed', compacted: false };
+    const initial = idleContext(key, body.bufferVersion);
+    if (initial.reason) return { ok: true, status: initial.reason, compacted: false };
+    // Inspect only an existing conversation; do not create or rotate sessions for maintenance.
+    const sid = mappings[key];
+    if (!sid || new Set(ctx.get?.('workspaceRegistry')?.archivedSessionIds ?? []).has(sid)) return { ok: true, status: 'uninitialized', compacted: false };
+    const configured = await configure(key, {}), agent = configured.agent;
+    const current = measureContext(key, agent.session, agent);
+    const fresh = idleContext(key, body.bufferVersion);
+    if (fresh.reason) { saveQuietly(); return { ok: true, status: fresh.reason, compacted: false, ...current }; }
+    if (current.contextTokens < fresh.policy.maxTokens) { saveQuietly(); return { ok: true, status: 'below_threshold', compacted: false, ...current }; }
+    const signature = hash(JSON.stringify([body.bufferVersion, fresh.policy.maxTokens, fresh.policy.idleSeconds]));
+    const previous = profiles[key].contextAuto;
+    if (previous?.signature === signature && (previous.completed || previous.attempts >= 3 || Date.now() < previous.retryAt)) return { ok: true, status: previous.completed ? 'waiting_new_messages' : 'waiting_retry', compacted: false, ...current };
+    const attempt = profiles[key].contextAuto = { signature, attempts: previous?.signature === signature ? previous.attempts + 1 : 1,
+      retryAt: Date.now() + 300000, startedAt: Date.now(), completed: false, status: 'compacting', tokensBefore: current.contextTokens };
+    persist(); // Reserve before the summary request, including across plugin restarts.
+    try {
+      const compactor = compactorFor(agent);
+      if (!compactor?.compactNow) throw Error('CONTEXT_COMPACTOR_UNAVAILABLE');
+      const result = await compactor.compactNow(agent, AbortSignal.timeout(Number(config.turnTimeoutMs ?? 120000)));
+      const after = measureContext(key, agent.session, agent);
+      Object.assign(attempt, { completed: true, finishedAt: Date.now(), status: result === null ? 'no_useful_range' : 'compacted', tokensAfter: after.contextTokens });
+      await ctx.sessions.flush(agent.session); persist();
+      return { ok: true, status: attempt.status, compacted: result !== null, tokensBefore: current.contextTokens, ...after };
+    } catch (error) { attempt.status = 'failed'; saveQuietly(); throw error; }
+  }
   async function serialize(key, action) {
     const previous=operations.get(key) ?? Promise.resolve();
     const next=previous.catch(()=>{}).then(action); operations.set(key,next);
@@ -140,10 +207,12 @@ export function apply(ctx, config={}) {
     const digest=hash(persona);
     const {sid,agent}=await agentFor(key), session=agent.session;
     if(pending.has(sid) || agent.status==='running')throw new Error('session_busy');
+    retireSocialToolMetadata(session,createUserMessage);
     const previous=profiles[key] ?? {};
     profiles[key]={...previous,persona,digest,personaName:clean(locked.personaName,24),conversationName:clean(body.conversationName ?? previous.conversationName),cache:previous.digest===digest && previous.behaviorPolicy===BEHAVIOR_POLICY && previous.coherencePolicy===COHERENCE_POLICY ? previous.cache ?? {} : {},behaviorPolicy:BEHAVIOR_POLICY,coherencePolicy:COHERENCE_POLICY};
     reconcilePersona(session, profiles[key]);
     offloadCompletedSessionImages(session);
+    retireSearchContext(session);
     const title=sessionTitle(key,profiles[key].conversationName,profiles[key].personaName);
     const titles=typeof ctx.get==='function'?ctx.get('sessionTitle'):ctx.sessionTitle;
     const current=titles?.get(session) ?? session.snapshotEvents().filter(event=>event.type==='session/title').at(-1)?.data;
@@ -160,20 +229,38 @@ export function apply(ctx, config={}) {
   ctx.on('agent/pre-step',async({agent},next)=>{
     const decision=await next(), key=keyFor(String(agent.session.id)), profile=profiles[key];
     if(!profile || decision?.kind!=='enter')return decision;
+    retireSocialToolMetadata(agent.session,createUserMessage);
     reconcilePersona(agent.session,profile);
     const state=contextState(agent.session,profile.digest);
-    if(state.initialized)return decision;
-    staged.add(String(agent.session.id));
-    return {...decision,messages:[initialization(profile,state.compactSeq),...decision.messages]};
+    const sid=String(agent.session.id),search=pending.get(sid)?.search;
+    const messages=[...decision.messages];
+    if(search && !sessionHasSearch(agent.session,search.ticket))messages.unshift(createUserMessage({content:[{type:'text',text:search.text}],
+      source:{kind:'wechat-social-bridge',form:'relay',socialSearch:{ticket:search.ticket,retired:false}}}));
+    if(!state.initialized){staged.add(sid);messages.unshift(initialization(profile,state.compactSeq));}
+    return {...decision,messages};
   },{global:true});
   // Context overflow recovery can compact between retries of a single step.
   // Those retries do not revisit pre-step; restore the role before retrying.
   ctx.on('agent/request',async({agent},next)=>{
-    const result=await next(), sid=String(agent.session.id), key=keyFor(sid), profile=profiles[key];
+    let result=await next();
+    const sid=String(agent.session.id), key=keyFor(sid), profile=profiles[key];
     if(profile && !staged.has(sid) && agent.session.surface.nodes.length){
       reconcilePersona(agent.session,profile);
       const state=contextState(agent.session,profile.digest);
       if(!state.initialized)agent.session.append('user/message',initialization(profile,state.compactSeq),{surfaceOp:'append'});
+    }
+    const search=pending.get(sid)?.search;
+    if(profile?.searchOutputLimitActive&&(!search||search.requests===0)){
+      const previous=profile.searchPreviousMaxTokens,effort=profile.searchPreviousReasoningEffort;
+      delete profile.searchPreviousMaxTokens;delete profile.searchPreviousReasoningEffort;delete profile.searchOutputLimitActive;saveQuietly();
+      const {maxTokens:unused,reasoningEffort:unusedEffort,...rest}=result;
+      result={...rest,...(previous===null||previous===undefined?{}:{maxTokens:previous}),...(effort===null||effort===undefined?{}:{reasoningEffort:effort})};
+    }
+    if(search){
+      // No second model request for searching, including overflow/retry steps.
+      if(++search.requests>1)throw new Error('SEARCH_MODEL_REQUEST_LIMIT');
+      consumeSearchRequest(root,key,search);
+      return result;
     }
     return result;
   },{global:true});
@@ -211,27 +298,29 @@ export function apply(ctx, config={}) {
     const reply=(code,body)=>{if(!res.destroyed){res.writeHead(code,{'content-type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));}};
     const supplied=Buffer.from(String(req.headers.authorization ?? '').replace(/^Bearer /i,'')), expected=Buffer.from(token);
     if(supplied.length!==expected.length || !crypto.timingSafeEqual(supplied,expected))return reply(401,{error:'unauthorized'});
-    if(req.method==='GET' && req.url==='/health')return reply(200,{ok:true,messageSource:'wechat-social-bridge',project:'WeChatAgent',projectRoot:root,contextMode:'native-session-v1',sessionNaming:true,imageInput:'native-attachment-v1',imageOffloadMode:'after-turn-v1',sessionLifecycle:'archive-rotation-v1',turnRecovery:'cancel-on-timeout-v1',pendingTurns:pending.size,behaviorPolicy:BEHAVIOR_POLICY,coherencePolicy:COHERENCE_POLICY});
-    if(req.method==='GET' && req.url==='/sessions')return reply(200,{sessions:Object.entries(mappings).map(([key,sid])=>({conversationKey:key,sessionId:sid,title:profiles[key]?.title ?? sessionTitle(key),initializations:profiles[key]?.initializations ?? 0,compactions:profiles[key]?.compactions ?? 0,generation:profiles[key]?.generation ?? 0,previousSessionCount:profiles[key]?.previousSessions?.length ?? 0}))});
-    if(req.method!=='POST' || !['/followup','/configure','/compact'].includes(req.url))return reply(404,{error:'not_found'});
+    if(req.method==='GET' && req.url==='/health')return reply(200,{ok:true,messageSource:'wechat-social-bridge',project:'WeChatAgent',projectRoot:root,contextMode:'native-session-v1',contextMaintenance:'idle-threshold-v1',sessionNaming:true,imageInput:'native-attachment-v1',imageOffloadMode:'after-turn-v1',sessionLifecycle:'archive-rotation-v1',turnRecovery:'cancel-on-timeout-v1',searchBudget:'per-turn-count-v1',searchReasoning:'model-default-v1',toolIsolation:SOCIAL_TOOL_ISOLATION,pendingTurns:pending.size,behaviorPolicy:BEHAVIOR_POLICY,coherencePolicy:COHERENCE_POLICY});
+    if(req.method==='GET' && req.url==='/sessions')return reply(200,{sessions:Object.entries(mappings).map(([key,sid])=>({conversationKey:key,sessionId:sid,title:profiles[key]?.title ?? sessionTitle(key),initializations:profiles[key]?.initializations ?? 0,compactions:profiles[key]?.compactions ?? 0,generation:profiles[key]?.generation ?? 0,previousSessionCount:profiles[key]?.previousSessions?.length ?? 0,...contextStatus(key,sid),contextAuto:profiles[key]?.contextAuto ? {status:profiles[key].contextAuto.status,finishedAt:profiles[key].contextAuto.finishedAt,retryAt:profiles[key].contextAuto.retryAt} : null}))});
+    if(req.method!=='POST' || !['/followup','/configure','/compact','/context-maintenance'].includes(req.url))return reply(404,{error:'not_found'});
     try{
       const chunks=[];let size=0;for await(const chunk of req){size+=chunk.length;if(size>65536)throw new Error('request_too_large');chunks.push(chunk);}
       const body=JSON.parse(Buffer.concat(chunks).toString('utf8')), key=String(body.conversationKey ?? ''), message=String(body.message ?? '');
       if(!KEY.test(key) || (req.url==='/followup' && (!message || message.length>18000)))return reply(400,{error:'invalid_request'});
       const output=await serialize(key,async()=>{
+        if(req.url==='/context-maintenance')return maintainContext(key,body);
         const {sid,agent}=await configure(key,body);
         if(pending.has(sid))throw new Error('session_busy');
         if(req.url==='/configure')return {ok:true,sessionId:sid,title:profiles[key].title,...personaStats(agent.session)};
         if(req.url==='/compact'){
-          const compactor=ctx.agentPresets.serviceFor?.(agent,'compaction') ??
-            (typeof agent.ctx?.get==='function'?agent.ctx.get('compaction'):(typeof ctx.get==='function'?ctx.get('compaction'):ctx.compaction));
+          const compactor=compactorFor(agent);
           if(!compactor?.compactNow)throw new Error('Native session compaction is unavailable in this agent context');
           const result=await compactor.compactNow(agent,AbortSignal.timeout(Number(config.turnTimeoutMs ?? 120000)));
-          return {ok:true,sessionId:sid,compacted:result!==null,reinitializeBeforeNextRequest:result!==null};
+          const measured=contextStatus(key,sid);saveQuietly();
+          return {ok:true,sessionId:sid,compacted:result!==null,reinitializeBeforeNextRequest:result!==null,...measured};
         }
         const batchId=typeof body.batchId==='string' && /^[a-f0-9]{64}$/.test(body.batchId)?body.batchId:null;
         const cached=batchId && profiles[key].cache?.[batchId];
         if(cached?.digest===profiles[key].digest)return {...cached.output,cached:true};
+        const search=admittedSearch(root,key,body);
         const images=await imageBlocks(ctx,root,key,body.images ?? [],provider,model);
         const output=await new Promise((resolve,reject)=>{
           const item={resolve,reject,batchId,timer:setTimeout(()=>{
@@ -242,13 +331,13 @@ export function apply(ctx, config={}) {
             try{agent.cancel({kind:'user'});}catch(error){log.warn('timed-out turn cancellation failed:',error.message);}
             reject(new Error('agent_timeout'));
           },Number(config.turnTimeoutMs ?? 120000))};
-          pending.set(sid,item);
+          item.search=search;pending.set(sid,item);
           try{agent.followup(createUserMessage({content:[{type:'text',text:message},...images],source:{kind:'wechat-social-bridge',form:'relay',...(images.length?{socialImageIds:body.images.map(image=>image.id)}:{})}}));}
           catch(error){clearTimeout(item.timer);pending.delete(sid);turns.delete(sid);staged.delete(sid);reject(error);}
         });
         // Native append observers cannot append recursively. Defer this until
         // the turn/end publisher has returned, before admitting another turn.
-        if(!output.error){offloadCompletedSessionImages(agent.session);await ctx.sessions.flush(agent.session);}
+        if(!output.error){offloadCompletedSessionImages(agent.session);retireSearchContext(agent.session);await ctx.sessions.flush(agent.session);contextStatus(key,sid);saveQuietly();}
         return output;
       });
       reply(output.error?502:200,output);

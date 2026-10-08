@@ -40,5 +40,5 @@ const built = spawnSync(compiler, ['/nologo', '/target:winexe', '/optimize+', `/
 if (built.status !== 0) throw new Error('Desktop launcher compilation failed: ' + (built.stdout || built.stderr));
 fs.copyFileSync(path.join(root, 'LICENSE'), path.join(output, 'WECHATAGENT-LICENSE.txt'));
 fs.copyFileSync(path.join(root, 'LICENSES.md'), path.join(output, 'PROJECT-LICENSES.md'));
-fs.writeFileSync(path.join(output, 'BUILD.json'), JSON.stringify({ product: 'WeChatAgent', version: '0.2.0', electron: fs.readFileSync(path.join(runtime, 'version'), 'utf8').trim(), node: process.version, entry: 'WeChatAgent.exe', projectRelativeToRuntime: '../..', projectDataBundled: false }, null, 2));
+fs.writeFileSync(path.join(output, 'BUILD.json'), JSON.stringify({ product: 'WeChatAgent', version: JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version, electron: fs.readFileSync(path.join(runtime, 'version'), 'utf8').trim(), node: process.version, entry: 'WeChatAgent.exe', projectRelativeToRuntime: '../..', projectDataBundled: false }, null, 2));
 console.log('Desktop application built: ' + launcher);

@@ -30,7 +30,7 @@ export class WechatOneBotAdapter extends BaseAdapter {
   }
 
   #receive(event) {
-    if (event?.post_type === 'meta_event') { this.emit('meta', event); return; }
+    if (event?.post_type === 'meta_event') {if(event.self_id)this.selfId=String(event.self_id);this.emit('meta', event); return; }
     const message = normalizeOneBotEvent('wechat', 'wechat-onebot', event);
     if (!message) return;
     if (!['text','image'].includes(message.message_type) || message.message_type === 'image' && !message.images.length) { this.log(`[WeChat] unsupported_message_type=${message.message_type}`); return; }
@@ -38,6 +38,7 @@ export class WechatOneBotAdapter extends BaseAdapter {
     const now = Date.now(); this.#prune(now);
     const key = this.#fingerprint(message.kind, message.conversation_id, message.text);
     const selfId = message.self_id;
+    if(selfId)this.selfId=selfId;
     if (selfId && (message.sender_id === selfId || String(event.user_id ?? '') === selfId)) return;
     if (this.recentOutgoing.has(key)) return;
     const incomingKey = `${message.message_id}:${key}`;
@@ -48,7 +49,7 @@ export class WechatOneBotAdapter extends BaseAdapter {
 
   async start() { await this.server.start(); }
   async stop() { await this.server.stop(); }
-  async sendText({ kind, target, text }) {
+  async sendText({ kind, target, text, deliveryId, source, contextId }) {
     if (kind !== 'private' && kind !== 'group') throw new TypeError('invalid WeChat kind');
     const content = String(text ?? '').trim();
     if (!content) throw new TypeError('empty WeChat message');
@@ -57,8 +58,16 @@ export class WechatOneBotAdapter extends BaseAdapter {
     if (!Number.isSafeInteger(id) || id <= 0) throw new TypeError('WeChat target must be a synthetic integer ID');
     const action = kind === 'group' ? 'send_group_msg' : 'send_private_msg';
     const params = { [kind === 'group' ? 'group_id' : 'user_id']: id,
-      message: [{ type: 'text', data: { text: content } }] };
-    const result = await this.server.action(action, params);
+      message: [{ type: 'text', data: { text: content } }],...(deliveryId?{wechatagent_delivery_id:deliveryId}:{}),
+      ...(source==='proactive'?{wechatagent_source:'proactive',wechatagent_context_id:contextId}:{}) };
+    let result;
+    try{result=await this.server.action(action,params);}
+    catch(error){
+      if(error.code!=='TEXT_DELIVERY_UNCONFIRMED'||error.data?.attempted!==true)throw error;
+      this.#prune(Date.now());this.recentOutgoing.set(this.#fingerprint(kind,id,content),Date.now()+this.antiLoopTtlMs);
+      this.log(`[WeChat] text_delivery_unconfirmed operation=${String(deliveryId??'').slice(0,12)}`);
+      return {accepted:false,attempted:true,delivered:'unconfirmed',deliveryId};
+    }
     // The I/O service acknowledges only after a new matching server receipt.
     if (result.data?.receipt !== 'wechat-server-id') throw new Error('WeChat send response has no verified server receipt');
     this.#prune(Date.now());
@@ -69,10 +78,10 @@ export class WechatOneBotAdapter extends BaseAdapter {
     const result=await this.server.action('get_sticker_list',{kind,target:String(target)});
     return result.data?.enabled?(result.data.stickers??[]):[];
   }
-  async sendSticker({kind,target,id}){
+  async sendSticker({kind,target,id,deliveryId}){
     if(!['private','group'].includes(kind)||!/^[a-f0-9]{64}$/.test(id))throw new TypeError('invalid sticker target');
     const result=await this.server.action(kind==='group'?'send_group_msg':'send_private_msg',{
-      [kind==='group'?'group_id':'user_id']:Number(target),message:[{type:'wechat_sticker',data:{id}}]});
+      [kind==='group'?'group_id':'user_id']:Number(target),message:[{type:'wechat_sticker',data:{id}}],...(deliveryId?{wechatagent_delivery_id:deliveryId}:{})});
     if(result.data?.receipt!=='wechat-server-id'||result.data?.media_type!=='wechat-sticker')throw new Error('Sticker send has no server receipt');
     this.stats.sends++;return result;
   }

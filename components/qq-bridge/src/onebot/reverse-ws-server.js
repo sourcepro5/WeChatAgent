@@ -104,7 +104,11 @@ export class ReverseOneBotServer extends EventEmitter {
       if (!pending) return;
       clearTimeout(pending.timer); this.pending.delete(key);
       if (data.status === 'ok' && Number(data.retcode) === 0) pending.resolve(data);
-      else pending.reject(new Error(`OneBot action failed: ${data.retcode ?? data.status ?? 'unknown'}`));
+      else{
+        const code=typeof data.message==='string'&&/^[A-Z0-9_]{3,80}$/.test(data.message)?data.message:undefined;
+        const error=new Error(`OneBot action failed: ${data.retcode??data.status??'unknown'}${code?' ('+code+')':''}`);
+        error.code=code;error.data=data.data;pending.reject(error);
+      }
       return;
     }
     try { this.emit('event', data); }

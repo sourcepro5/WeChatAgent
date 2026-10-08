@@ -45,6 +45,13 @@ export function runConsoleCommand(spec, onOutput, { cwd, env = process.env, time
 
 export function taskFailureMessage(output, code) {
   if (code === 124) return '操作等待超时。请查看连接检查与日志，确认当前服务状态后重试。';
+  if (/ModuleNotFoundError|ImportError|DLL load failed|需要 sqlcipher3/i.test(output)) return '读取组件缺失或无法加载。请重新安装更新后的安装包，然后在首次配置中点击“验证内置环境”。';
+  if (/Selected account database directory is unavailable/i.test(output)) return '找不到所选账号的数据库目录。请在首次配置中自动查找账号，或重新选择包含 db_storage 的账号文件夹。';
+  if (/Selected account database credential verification failed/i.test(output)) return '密钥与当前账号数据库不匹配。请在首次配置中点击“一键连接并验证”重新获取。';
+  if (/Windows current-user credential decryption failed|Legacy secret requires/i.test(output)) return '已有凭据无法在当前电脑或 Windows 用户下读取。请在首次配置中点击“一键连接并验证”重新获取。';
+  if (/Contact database could not be read|One or more message shards could not be read/i.test(output)) return '微信数据库尚未完整同步或暂时无法读取。请在微信打开几个聊天，等待同步后重新连接并验证。';
+  if (/Reader initialization failed: (?:KeyError|FileNotFoundError)/i.test(output)) return '数据库读取设置尚未完成。请在首次配置中选择账号并点击“一键连接并验证”。';
+  if (/reader exited/i.test(output)) return '数据库读取器未能启动。请在首次配置中重新连接并验证微信；下方会显示读取器的具体错误。';
   if (/HOOK_COMPONENT_UPDATE_PENDING/.test(output)) return '发送组件已更新。请从匹配微信的托盘菜单完整退出，再点击“打开微信”应用更新。';
   if (/CouldNotAutoloadMatchingModule|Microsoft\.PowerShell\.Security.*module|Get-AuthenticodeSignature.*ObjectNotFound/is.test(output)) return 'Windows PowerShell 安全模块未能加载。请退出应用后重新打开更新后的 WeChatAgent.exe。';
   if (/WECHAT_LAUNCH_EXITED/i.test(output)) return '微信启动后已退出。若微信提示必须升级，当前固定版本的发送组件需要重新适配；请保留完整微信提示。';

@@ -26,6 +26,7 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wechat_media import clean_account_wxid
 from wechat_forwarded import FORWARD_TYPE, parse_forwarded_record
+from wechat_quote import QUOTE_TYPE, parse_quote_reply
 from wechat_sticker_send import sticker_send_fields, sticker_receipt_md5, APPMSG_STICKER_TYPE, native_gif_bytes
 from wechat_sticker import emoji_attributes, resolve_sticker_bytes
 from wechat_sticker_labels import StickerLabels, clean_label
@@ -101,7 +102,7 @@ def push_payload(talker, message, names, own_wxid):
     if message.get('isSend'):
         return None
     kind = message.get('localType')
-    if kind not in (1, 3, 47, PAT_TYPE, 49, FORWARD_TYPE):
+    if kind not in (1, 3, 47, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE):
         return None
     pat = parse_pat(message.get('fullText', ''), sender, own_wxid) if kind == PAT_TYPE else None
     if kind == PAT_TYPE and not pat:
@@ -111,9 +112,10 @@ def push_payload(talker, message, names, own_wxid):
     if not sender or clean_account_wxid(sender) == clean_account_wxid(own_wxid):
         return None
     forwarded = parse_forwarded_record(message.get('fullText', '')) if kind in (49, FORWARD_TYPE) else None
-    if kind in (49, FORWARD_TYPE) and forwarded is None:
+    quote_reply = parse_quote_reply(message.get('fullText', '')) if kind in (49, QUOTE_TYPE) else None
+    if kind in (49, FORWARD_TYPE, QUOTE_TYPE) and forwarded is None and quote_reply is None:
         return None
-    content = '[图片]' if kind == 3 else '[表情包：附件为静态画面或动画采样画面]' if kind == 47 else '[拍一拍] 对方刚刚拍了拍你。' if pat else '[合并转发聊天记录] ' + forwarded['title'] if forwarded else message.get('fullText', message.get('content') or message.get('parsedContent', ''))
+    content = '[图片]' if kind == 3 else '[表情包：附件为静态画面或动画采样画面]' if kind == 47 else '[拍一拍] 对方刚刚拍了拍你。' if pat else '[合并转发聊天记录] ' + forwarded['title'] if forwarded else (quote_reply['reply'] or '[引用回复，正文为空]') if quote_reply else message.get('fullText', message.get('content') or message.get('parsedContent', ''))
     if not content.strip():
         return None
     group = '@chatroom' in talker
@@ -127,6 +129,7 @@ def push_payload(talker, message, names, own_wxid):
         'content': content[:4000], 'type': kind, 'timestamp': message.get('createTime', 0),
         **({'pat': pat} if pat else {}),
         **({'forwardedRecord': forwarded} if forwarded else {}),
+        **({'quoteReply': quote_reply} if quote_reply else {}),
         **({'image': {'localId': message.get('localId'), 'serverId': message.get('serverId'),
             'createTime': message.get('createTime'), 'localType': kind}} if kind in (3, 47) else {})}
 
@@ -146,8 +149,10 @@ class Reader:
         self.passphrase = local_secret(settings['decryptKey'])
         if nt.verify_passphrase_native(self.passphrase, str(self.message_db)) is not True:
             raise RuntimeError('Selected account database credential verification failed')
-        self.own_wxid = read_json(self.root / 'state' / 'wechat-io-config.json').get('self_wxid') or selected.rsplit('_', 1)[0]
+        self.own_wxid = read_json(self.root / 'state' / 'wechat-io-config.json').get('self_wxid') or clean_account_wxid(selected)
         self.names = {}
+        self.names_lock = threading.Lock()
+        self.names_refreshed_at = 0
         self.refresh_names()
         self.clients = set()
         self.lock = threading.Lock()
@@ -173,12 +178,39 @@ class Reader:
         for connection in connections:
             connection.close()
 
-    def refresh_names(self):
-        key, salt = nt.derive_database_key(str(self.contact_db), '', '', self.passphrase)
-        names = nt.load_contact_names(str(self.contact_db), key, salt)
-        if not names:
-            raise RuntimeError('Contact database could not be read')
-        self.names = names
+    def refresh_names(self, max_age=0):
+        with self.names_lock:
+            if max_age and time.monotonic() - self.names_refreshed_at < max_age:
+                return
+            key, salt = nt.derive_database_key(str(self.contact_db), '', '', self.passphrase)
+            names = nt.load_contact_names(str(self.contact_db), key, salt)
+            if not names:
+                raise RuntimeError('Contact database could not be read')
+            self.names = names
+            self.names_refreshed_at = time.monotonic()
+
+    def contacts(self, keyword='', kind='', limit=100):
+        # Metadata discovery includes unselected chats without opening message shards.
+        self.refresh_names(max_age=30)
+        names = self.names
+        keyword = keyword.strip().casefold()
+        counts = {}
+        for talker in names:
+            if '@chatroom' in talker:
+                identity = conversation_id(talker, names)
+                counts[identity] = counts.get(identity, 0) + 1
+        contacts = []
+        for talker, name in names.items():
+            group = '@chatroom' in talker
+            if kind in ('groups', 'private') and group != (kind == 'groups'):
+                continue
+            if keyword not in (talker + name).casefold():
+                continue
+            contacts.append({'username': talker, 'displayName': name,
+                'ambiguous': group and counts[conversation_id(talker, names)] > 1})
+            if len(contacts) >= limit:
+                break
+        return contacts
 
     def open_messages(self):
         pairs, failures = nt.connect_message_shards_detailed(str(self.message_db), '', '', self.passphrase)
@@ -212,7 +244,7 @@ class Reader:
             # Preserve complete text: the upstream CLI display truncates to 200.
             table = 'Msg_' + hashlib.md5(talker.encode()).hexdigest()
             for message in data.get('messages', []):
-                if message.get('localType') not in (1, PAT_TYPE, 49, FORWARD_TYPE, 47, APPMSG_STICKER_TYPE):
+                if message.get('localType') not in (1, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE, 47, APPMSG_STICKER_TYPE):
                     continue
                 for connection in connections:
                     if table not in nt.msg_tables(connection):
@@ -551,8 +583,7 @@ def serve(reader, port, token):
                         connection.close()
                     self.respond({'success': True, 'sessions': reader.sessions(limit)})
                 elif url.path == '/api/v1/contacts':
-                    keyword = query.get('keyword', [''])[0].casefold()
-                    contacts = [{'username': talker, 'displayName': name} for talker, name in reader.names.items() if keyword in (talker + name).casefold()][:limit]
+                    contacts = reader.contacts(query.get('keyword', [''])[0], query.get('kind', [''])[0], limit)
                     self.respond({'success': True, 'contacts': contacts})
                 elif url.path == '/api/v1/messages':
                     talker = query.get('talker', [''])[0]

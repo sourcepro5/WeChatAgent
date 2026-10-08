@@ -63,7 +63,7 @@ DSH 的 `meta.agentPreset` 只记录会话元数据。插件在新建和恢复�
 首次新消息会自动配置标题；现有白名单聊天可一次性同步：
 
 ```powershell
-cd <project-root>
+Set-Location '<项目目录>'
 npm run sessions:configure
 npm run sessions:status
 ```

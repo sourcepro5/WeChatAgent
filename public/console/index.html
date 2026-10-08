@@ -7,7 +7,7 @@
   <title>WeChatAgent · 控制台</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/console.css">
-  <script src="/console.js" defer></script>
+<script src="/console.js" type="module"></script>
 </head>
 <body>
   <a href="#content" class="skip-link">跳到内容</a>
@@ -37,7 +37,7 @@
       <div id="setup-banner" class="notice" hidden><svg><use href="/icons.svg#info"></use></svg><span>运行环境已内置，请完成自己账号的首次配置。</span><a class="button small" href="#setup">开始配置</a></div>
       <div id="page-body"><div class="loading-state">正在连接本机控制台…</div></div>
     </main>
-    <div class="save-bar" id="save-bar" hidden><div><strong>有未保存的设置</strong><span>表情开关保存后立即生效，其他设置需重启服务。</span></div><div class="button-row"><button class="button" id="discard-button">放弃更改</button><button class="button primary" id="save-button">保存设置</button></div></div>
+    <div class="save-bar" id="save-bar" hidden><div><strong>有未保存的设置</strong><span>表情、联网、主动聊天与上下文设置保存后生效，其他设置需重启服务。</span></div><div class="button-row"><button class="button" id="discard-button">放弃更改</button><button class="button primary" id="save-button">保存设置</button></div></div>
   </div>
   <dialog id="modal" aria-labelledby="modal-title"><div class="modal-header"><h2 id="modal-title"></h2><button class="icon-button" id="modal-close" aria-label="关闭窗口"><svg><use href="/icons.svg#close"></use></svg></button></div><div id="modal-content"></div></dialog>
   <div class="toast" id="toast" role="status" hidden></div>

@@ -1,10 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectRoleText } from '../components/qq-bridge/src/role-card.js';
 import { migrateConnections } from './migrate-io-config.mjs';
 import { validateStickerSettings } from '../components/qq-bridge/src/core/sticker-policy.js';
+import { validateSearchSettings } from '../packages/dsh-social-bridge-plugin/search-policy.mjs';
+import {validateProactiveSettings} from '../components/qq-bridge/src/core/proactive-policy.js';
+import { validateContextSettings } from '../packages/dsh-social-bridge-plugin/context-policy.mjs';
 
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
@@ -15,6 +18,9 @@ const write = (file, value) => {
 };
 export function validateConfig(config) {
   validateStickerSettings(config.wechat?.stickers);
+  validateSearchSettings(config.wechat?.search);
+  validateProactiveSettings(config.wechat?.proactive);
+  validateContextSettings(config.wechat?.context);
   if (config.version !== 1) throw new Error('Unsupported WeChatAgent config version');
   if (!['nt', 'bundled', 'existing'].includes(config.runtime?.weflowMode ?? 'nt')) throw new Error('weflowMode must be nt, bundled or existing');
   if (config.runtime?.sender !== 'wechat-hook') throw new Error('sender must be wechat-hook; the UIA sender has been removed');
@@ -72,6 +78,11 @@ export function prepare(root = projectRoot) {
     platforms: { wechat: { enabled: true, adapter: 'wechat-onebot', onebot: { server: { host: '127.0.0.1', port: config.ports.onebot, path: '/ws', timeoutMs: 45000 } }, ...config.wechat } },
     dsh_plugin: { url: `http://127.0.0.1:${config.ports.dshPlugin}`, timeoutMs: 125000 },
     sticker_policy_file: configFile,
+    search_policy_file: configFile,
+    search_state_file: path.join(state,'search/state.json'),
+    proactive_policy_file:configFile,
+    proactive_state_file:path.join(state,'proactive/state.json'),
+    context_policy_file:configFile,
     message_buffer: { path: path.join(state, 'social-messages.json'), max_messages_per_chat: 300 },
     // Original Bridge accepts inline persona text; it needs no source/path changes.
     persona_name: config.persona.default,
@@ -94,6 +105,12 @@ export function prepare(root = projectRoot) {
   if (fs.existsSync(patchFile)) {
     const before = fs.readFileSync(patchFile, 'utf8');
     let after = before.replace(/^(        provider:).*/m, `$1 ${JSON.stringify(config.dsh.provider)}`).replace(/^(        model:).*/m, `$1 ${JSON.stringify(config.dsh.model)}`);
+    const moduleDir=path.dirname(patchFile),sources=['native-context.mjs','search-budget.mjs','search-policy.mjs','social-tool-policy.mjs','social-tool-restrict.mjs','context-policy.mjs'].map(name=>path.join(moduleDir,name));
+    if(sources.every(file=>fs.existsSync(file))){
+      const revision=crypto.createHash('sha256').update(Buffer.concat(sources.map(file=>fs.readFileSync(file)))).digest('hex').slice(0,16);
+      const entry=pathToFileURL(sources[0]).href+'?wechatagent='+revision;
+      after=after.replace(/(    - id: dsh-social-bridge-plugin\r?\n      name:).*/,'$1 '+JSON.stringify(entry));
+    }
     after = /^        port:/m.test(after) ? after.replace(/^        port:.*/m, `        port: ${config.ports.dshPlugin}`) : after.replace(/^(        model:.*)$/m, `$1\n        port: ${config.ports.dshPlugin}`);
     if (before !== after) fs.writeFileSync(patchFile, after);
   }

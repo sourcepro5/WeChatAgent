@@ -1,11 +1,89 @@
 {
   "version": 1,
-  "runtime": { "python": "python", "dshDesktop": "", "weflowMode": "nt", "sender": "wechat-hook" },
-  "hook": { "baseUrl": "http://127.0.0.1:30001", "expectedVersion": "4.1.10.27", "wechatExecutable": "state/hook/wechat-4.1.10.27/Weixin.exe", "requestTimeoutMs": 5000, "receiptTimeoutMs": 18000, "maxConcurrentSends": 4 },
-  "ports": { "weflow": 5031, "onebot": 11229, "adapter": 8766, "dshPlugin": 11230 },
-  "account": { "nicknames": ["小助手"] },
-  "wechat": { "whitelist": { "groups": [], "private": [] }, "wake_mode": "hybrid", "wake_words": ["小助手"], "media": { "allowStickerCdn": false, "allowStickerCdnAlias": false }, "stickers": { "enabled": true, "labelCache": true, "chats": {} } },
-  "persona": { "default": "示例助手", "chats": {} },
-  "social": { "batch_ms": 3000, "min_interval_ms": 15000, "private_min_interval_ms": 1000, "max_per_minute": 3, "max_per_ten_minutes": 10 },
-  "dsh": { "provider": "deepseek-account", "model": "deepseek-flash" }
+  "runtime": {
+    "python": "python",
+    "dshDesktop": "",
+    "weflowMode": "nt",
+    "sender": "wechat-hook"
+  },
+  "hook": {
+    "baseUrl": "http://127.0.0.1:30001",
+    "expectedVersion": "4.1.10.27",
+    "wechatExecutable": "state/hook/wechat-4.1.10.27/Weixin.exe",
+    "requestTimeoutMs": 5000,
+    "receiptTimeoutMs": 18000,
+    "maxConcurrentSends": 4
+  },
+  "ports": {
+    "weflow": 5031,
+    "onebot": 11229,
+    "adapter": 8766,
+    "dshPlugin": 11230
+  },
+  "account": {
+    "nicknames": [
+      "小助手"
+    ]
+  },
+  "wechat": {
+    "whitelist": {
+      "groups": [],
+      "private": []
+    },
+    "wake_mode": "hybrid",
+    "wake_words": [
+      "小助手"
+    ],
+    "media": {
+      "allowStickerCdn": false,
+      "allowStickerCdnAlias": false
+    },
+    "stickers": {
+      "enabled": true,
+      "labelCache": true,
+      "chats": {}
+    },
+    "search": {
+      "enabled": false,
+      "cache": true,
+      "maxResults": 3,
+      "maxSnippetChars": 1200,
+      "maxSearchesPerTurn": 1,
+      "timeoutMs": 8000,
+      "cacheTtlSeconds": 900,
+      "chats": {}
+    },
+    "proactive": {
+      "enabled": false,
+      "mode": "mixed",
+      "intervalMinutes": 240,
+      "idleMinutes": 120,
+      "startTime": "09:00",
+      "endTime": "22:00",
+      "jitterMinutes": 15,
+      "useSearch": true,
+      "chats": {}
+    },
+    "context": {
+      "enabled": false,
+      "maxTokens": 100000,
+      "idleSeconds": 60,
+      "chats": {}
+    }
+  },
+  "persona": {
+    "default": "示例助手",
+    "chats": {}
+  },
+  "social": {
+    "batch_ms": 3000,
+    "min_interval_ms": 15000,
+    "private_min_interval_ms": 1000,
+    "max_per_minute": 3,
+    "max_per_ten_minutes": 10
+  },
+  "dsh": {
+    "provider": "deepseek-account",
+    "model": "deepseek-flash"
+  }
 }
