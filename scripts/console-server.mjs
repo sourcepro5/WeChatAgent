@@ -280,7 +280,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       const url = new URL(req.url, origin);
       const route = url.pathname;
       if (req.method === 'GET' && !route.startsWith('/api/')) {
-        const assets = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/console.css': ['console.css', 'text/css; charset=utf-8'], '/console.js': ['console.js', 'text/javascript; charset=utf-8'], '/persona-files.mjs': ['persona-files.mjs', 'text/javascript; charset=utf-8'], '/icons.svg': ['icons.svg', 'image/svg+xml'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'] };
+        const assets = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/console.css': ['console.css', 'text/css; charset=utf-8'], '/console.js': ['console.js', 'text/javascript; charset=utf-8'], '/persona-files.mjs': ['persona-files.mjs', 'text/javascript; charset=utf-8'], '/appearance.js': ['appearance.js', 'text/javascript; charset=utf-8'], '/appearance.css': ['appearance.css', 'text/css; charset=utf-8'], '/icons.svg': ['icons.svg', 'image/svg+xml'], '/app-icon.png': ['app-icon.png', 'image/png'], '/favicon.svg': ['app-icon.png', 'image/png'] };
         if (!assets[route]) return reply(404, { error: '页面不存在。' });
         const [file, type] = assets[route]; return reply(200, fs.readFileSync(path.join(publicDir, file)), type);
       }
@@ -290,7 +290,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       if (req.method === 'GET' && route === '/api/deployment') {
         const distribution = optionalJson(path.join(root, 'config', 'distribution.json'));
         const readerSettings = optionalJson(path.join(root, 'state', 'weflow', 'WeFlow-config.json'));
-        return reply(200, { installed: !!distribution.installed, version: distribution.version ?? '0.2.1', configured: !!readerSettings.dbPath && !!readerSettings.myWxid && !!readerSettings.decryptKey && readerVerified(), pluginPath: path.join(root, 'packages', 'dsh-social-bridge-plugin') });
+        return reply(200, { installed: !!distribution.installed, version: distribution.version ?? '0.2.2', configured: !!readerSettings.dbPath && !!readerSettings.myWxid && !!readerSettings.decryptKey && readerVerified(), pluginPath: path.join(root, 'packages', 'dsh-social-bridge-plugin') });
       }
       if (req.method === 'GET' && route === '/api/status') return reply(200, await getStatus());
       if (req.method === 'GET' && route === '/api/roles') {

@@ -1,5 +1,6 @@
 'use strict';
 import { personaError, decodePersonaFile, MAX_PERSONA_BYTES } from './persona-files.mjs';
+import { initAppearance } from './appearance.js';
 const $ = selector => document.querySelector(selector);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const icon = name => `<svg aria-hidden="true"><use href="/icons.svg#${name}"></use></svg>`;
@@ -554,7 +555,7 @@ if (window.desktop) {
   document.body.classList.add('desktop-mode');
   $('.brand span').textContent = '桌面应用';
   $('.breadcrumb > span:first-of-type').textContent = 'WeChatAgent';
-  $('.version').textContent = '0.2.1 · 关闭窗口收起到托盘';
+  $('.version').textContent = '0.2.2 · 关闭窗口收起到托盘';
   $('#quit-console').textContent = '退出应用';
 }
 document.addEventListener('click', event => { if (document.body.classList.contains('nav-open') && !event.target.closest('.sidebar') && !event.target.closest('#menu-button')) document.body.classList.remove('nav-open'); });
@@ -564,6 +565,7 @@ function applyTheme(theme) { document.documentElement.dataset.theme = theme; $('
 let savedTheme; try { savedTheme = localStorage.getItem('wechatagent-console-theme'); } catch {}
 applyTheme(window.desktop?.initialTheme ?? (savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 $('#theme-button').addEventListener('click', () => { const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; applyTheme(theme); try { localStorage.setItem('wechatagent-console-theme', theme); } catch {} });
+initAppearance({modal,closeModal,toast,escapeHtml,icon});
 $('#refresh-button').addEventListener('click', async () => {
   if (!state.config) { try { await load(); } catch (error) { showError(error.message); } return; }
   if (hasDraft()) { await refreshStatus(); toast('状态已刷新，未保存的草稿已保留。'); return; }

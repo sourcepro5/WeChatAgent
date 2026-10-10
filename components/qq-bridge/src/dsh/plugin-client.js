@@ -28,7 +28,8 @@ export class DshPluginClient {
     if (!response.ok && body.error === 'agent_unavailable' && body.detail === 'IMAGE_READER_NOT_READY' && metadata.images?.length) {
       // This specific failure occurs before admission of the model turn. Do
       // not retry model, integrity, permission or conversation-binding errors.
-      this.log(`[Social] ${conversationKey} attachment_unavailable count=${metadata.images.length}; continuing with text`);
+      const reason = typeof body.imageError === 'string' && /^IMAGE_[A-Z_]{3,80}$/.test(body.imageError) ? body.imageError : 'IMAGE_READER_NOT_READY';
+      this.log(`[Social] ${conversationKey} attachment_unavailable count=${metadata.images.length} reason=${reason}; continuing with text`);
       const notice = '\n附件状态：本批图片附件读取失败，本轮没有提供图片。不得猜测或声称看到图片内容；可回应其他文字，图片问题请明确说明未能读取。';
       if (message.length + notice.length > 18000) throw new Error('IMAGE_FALLBACK_MESSAGE_TOO_LARGE');
       const fallbackMetadata={...metadata,images:[],...(metadata.batchId?{batchId:crypto.createHash('sha256').update(metadata.batchId+'\0without-images-v1').digest('hex')}:{})};

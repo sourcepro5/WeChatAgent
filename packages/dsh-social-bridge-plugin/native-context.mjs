@@ -341,7 +341,7 @@ export function apply(ctx, config={}) {
         return output;
       });
       reply(output.error?502:200,output);
-    }catch(error){log.warn('session request failed:',error.message);reply(error.message==='BEHAVIOR_CHANGE_NOT_ALLOWED'?403:503,{error:error.message==='BEHAVIOR_CHANGE_NOT_ALLOWED'?'behavior_change_denied':'agent_unavailable',detail:String(error.message).slice(0,200)});}
+    }catch(error){log.warn('session request failed:',error.message);reply(error.message==='BEHAVIOR_CHANGE_NOT_ALLOWED'?403:503,{error:error.message==='BEHAVIOR_CHANGE_NOT_ALLOWED'?'behavior_change_denied':'agent_unavailable',detail:String(error.message).slice(0,200),...(typeof error.imageError==='string'&&/^IMAGE_[A-Z_]{3,80}$/.test(error.imageError)?{imageError:error.imageError}:{})});}
   });
   server.on('error',error=>log.warn('local RPC server error:',error.message));
   server.listen(port,host,()=>log.info(`Native-session WeChat plugin listening on ${host}:${port}`));

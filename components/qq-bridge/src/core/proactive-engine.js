@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {buildConversationKey,parseConversationKey} from './conversation-key.js';
-import {parseSocialDecision} from './social-engine.js';
+import {SOCIAL_OUTPUT_NOTICE,resolveSocialDecision} from './decision-format.js';
 import {CHAT_POLICY_NOTICE,CHAT_COHERENCE_NOTICE} from './chat-policy.js';
 import {proactivePolicy,proactivePolicyKey,withinProactiveWindow,nextProactiveAt,conversationSnapshot,declinedProactive} from './proactive-policy.js';
 
@@ -19,7 +19,7 @@ export function buildProactivePrompt({key,rows,mode,now,searchStatus,recentTopic
     `<untrusted_chat>\n${history||'[尚无聊天历史，不假定已经很熟]'}\n</untrusted_chat>\n`+
     (recentTopics.length?'最近主动说过的内容（历史资料，避免重复）：\n'+recentTopics.slice(-6).map(item=>quote(item.text.slice(0,180))).join('\n')+'\n':'')+
     (mode==='greeting'?'本轮不需要联网。':searchStatus==='ready'?'本轮附有有界搜索摘要。只说摘要支持的事实；来源不足不编造“最新”“全网热度”或梗出处，可带一个相关来源链接。':'本轮没有可用的新搜索资料，不得编造实时热点或新梗；可自然问候或沉默。')+'\n'+
-    CHAT_POLICY_NOTICE+'\n'+CHAT_COHERENCE_NOTICE+'\n只输出 SILENT 或 RESPOND: 后接要发出的短消息，不输出内部推理。';
+    CHAT_POLICY_NOTICE+'\n'+CHAT_COHERENCE_NOTICE+'\n'+SOCIAL_OUTPUT_NOTICE;
 }
 export class ProactiveEngine {
   constructor({stateFile,buffer,social,settingsFor,personaFor,decide,send,searchFor=async()=>null,isReady=()=>true,selfIdFor=()=>'',
@@ -95,9 +95,9 @@ export class ProactiveEngine {
       const prompt=buildProactivePrompt({key,rows,mode:job.mode,now:this.now(),searchStatus:search?.status,recentTopics:item.history})+
         (notice?'\n本机发送状态说明：'+quote(notice.text):'');
       job.noticeId=notice?.id;
-      let output;
-      try{output=await this.decide(key,prompt,metadata);}catch(error){this.notice(key,job.id);item.job=null;this.save();this.log(`[Proactive] ${key} decision_failed`);return;}
-      const result=parseSocialDecision(output);
+      let result;
+      try{({result}=await resolveSocialDecision({rawOutput:await this.decide(key,prompt+'\n'+SOCIAL_OUTPUT_NOTICE,metadata),key,metadata,decide:(...args)=>this.decide(...args),log:this.log}));}
+      catch(error){this.notice(key,job.id);item.job=null;this.save();this.log(`[Proactive] ${key} decision_failed`);return;}
       if(result.decision!=='RESPOND'||item.history.some(entry=>entry.text.trim()===result.text.trim()&&this.now()-entry.at<86400000)){
         if(result.decision==='RESPOND')this.notice(key,job.id);
         item.job=null;this.save();this.log(`[Proactive] ${key} skipped decision=${result.decision}`);return;

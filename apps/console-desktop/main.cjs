@@ -4,6 +4,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { projectDirectory, safeNavigation, windowPlacement } = require('./desktop-policy.cjs');
 const { bootstrapDeployment } = require('./deployment.cjs');
+const { createAppearanceStore, strengthOf } = require('./appearance.cjs');
 
 app.setName('WeChatAgent');
 app.setAppUserModelId('local.wechatagent.desktop');
@@ -18,6 +19,7 @@ app.setPath('sessionData', path.join(dataDirectory, 'session'));
 const preferenceFile = path.join(dataDirectory, 'window.json');
 let preferences = {};
 try { preferences = JSON.parse(fs.readFileSync(preferenceFile, 'utf8')); } catch {}
+const appearanceStore = createAppearanceStore(dataDirectory, nativeImage);
 let window, tray, consoleApp, origin; let quitting = false;
 const savePreferences = () => {
   const temp = preferenceFile + '.tmp'; fs.writeFileSync(temp, JSON.stringify(preferences, null, 2)); fs.renameSync(temp, preferenceFile);
@@ -67,7 +69,22 @@ else {
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, devTools: false, spellcheck: false },
     });
     const trusted = event => event.sender === window.webContents && safeNavigation(event.senderFrame?.url ?? '', origin);
-    ipcMain.on('desktop:initial', event => { event.returnValue = event.sender === window.webContents ? { theme: preferences.theme ?? theme } : {}; });
+    ipcMain.on('desktop:initial', event => { event.returnValue = event.sender === window.webContents ? { theme: preferences.theme ?? theme, appearance:appearanceStore.read(preferences.appearance) } : {}; });
+    ipcMain.handle('desktop:appearance-choose', async event => {
+      if (!trusted(event)) throw new Error('不允许此窗口修改背景。');
+      const result = await dialog.showOpenDialog(window,{title:'选择背景图片',properties:['openFile'],filters:[{name:'图片',extensions:['png','jpg','jpeg']}]});
+      if(result.canceled || !result.filePaths[0])return {canceled:true};
+      preferences.appearance = await appearanceStore.importFile(result.filePaths[0],preferences.appearance);
+      savePreferences();return appearanceStore.read(preferences.appearance);
+    });
+    ipcMain.handle('desktop:appearance-strength',(event,value)=>{
+      if(!trusted(event)||!Number.isFinite(value))throw new Error('背景强度无效。');
+      preferences.appearance={...preferences.appearance,strength:strengthOf(value)};savePreferences();return {strength:preferences.appearance.strength};
+    });
+    ipcMain.handle('desktop:appearance-reset',event=>{
+      if(!trusted(event))throw new Error('不允许此窗口修改背景。');
+      appearanceStore.reset();delete preferences.appearance;savePreferences();return appearanceStore.read();
+    });
     ipcMain.handle('desktop:theme', (event, value) => {
       if (!trusted(event) || !['light', 'dark'].includes(value)) return;
       preferences.theme = value; savePreferences();

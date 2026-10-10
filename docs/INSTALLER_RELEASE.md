@@ -1,6 +1,6 @@
 # Windows 安装发行版
 
-安装器为 WeChatAgent-Setup-0.2.1-x64.exe，包含独立桌面应用、Node.js、Python、读取依赖及维护者已授权的微信、发送与自动连接组件。DSH 桌面端与插件 SDK 锁定 0.2.0-rc.2。
+安装器为 WeChatAgent-Setup-0.2.2-x64.exe，包含独立桌面应用、Node.js、Python、读取依赖及维护者已授权的微信、发送与自动连接组件。DSH 桌面端与插件 SDK 锁定 0.2.0-rc.2。
 
 此源码副本不包含安装器或 vendor 程序。安装器、SHA256SUMS.txt 与 VERIFICATION.json 作为 GitHub Releases 附件单独上传，release/、state/ 和第三方二进制继续排除在 Git 源码提交外。
 

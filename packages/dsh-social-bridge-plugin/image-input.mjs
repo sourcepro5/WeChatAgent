@@ -17,7 +17,12 @@ export async function imageBlocks(ctx,root,conversationKey,images,provider,model
   const blocks=[];
   for (const image of images) {
     const response=await fetch(base.origin+'/api/v1/images/'+image.id,{headers:{Authorization:'Bearer '+io.reader_token},redirect:'error',signal});
-    if (!response.ok) throw new Error('IMAGE_READER_NOT_READY');
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({}));
+      const error = new Error('IMAGE_READER_NOT_READY');
+      if (typeof failure.error === 'string' && /^IMAGE_[A-Z_]{3,80}$/.test(failure.error)) error.imageError = failure.error;
+      throw error;
+    }
     const content=await response.json();
     if (content.imageId!==image.id || content.conversationKey!==conversationKey) throw new Error('IMAGE_CONVERSATION_MISMATCH');
     if (typeof content.b64!=='string' || content.b64.length>1100000 || !['image/png','image/jpeg','image/webp'].includes(content.mime)) throw new Error('INVALID_IMAGE_DATA');

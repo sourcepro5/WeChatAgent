@@ -61,6 +61,24 @@ def read_json(file):
     return json.loads(pathlib.Path(file).read_text(encoding='utf-8-sig'))
 
 
+def image_worker_failure(stderr):
+    code, details = 'IMAGE_RESOLUTION_FAILED', []
+    try:
+        result = json.loads(stderr.strip().splitlines()[-1])
+        if re.fullmatch(r'IMAGE_[A-Z_]{3,80}', str(result.get('error', ''))):
+            code = result['error']
+        for key in ('exceptionType', 'module'):
+            value = result.get(key, '')
+            if isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.]{1,80}', value):
+                details.append(key + '=' + value)
+    except (ValueError, IndexError, AttributeError):
+        if 'ModuleNotFoundError:' in stderr:
+            code = 'IMAGE_DEPENDENCY_MISSING'
+        elif 'ImportError:' in stderr or 'DLL load failed' in stderr:
+            code = 'IMAGE_DEPENDENCY_LOAD_FAILED'
+    return code, ' '.join(details)
+
+
 def local_secret(value):
     if not value.startswith('userdpapi:'):
         if value.startswith('safe:'):
@@ -321,17 +339,17 @@ class Reader:
         if cache.is_file():
             return read_json(cache)
         def run():
-            process = subprocess.run([sys.executable, '-B', str(self.root / 'scripts' / 'resolve-wechat-image.py')],
-                input=json.dumps(descriptor), capture_output=True, text=True, encoding='utf-8', timeout=65,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            try:
+                process = subprocess.run([sys.executable, '-B', str(self.root / 'scripts' / 'resolve-wechat-image.py')],
+                    input=json.dumps(descriptor), capture_output=True, text=True, encoding='utf-8', timeout=65,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            except (subprocess.TimeoutExpired, OSError) as error:
+                self.image_error = 'IMAGE_PROCESS_TIMEOUT' if isinstance(error, subprocess.TimeoutExpired) else 'IMAGE_PROCESS_START_FAILED'
+                print('Image resolution failed: ' + self.image_error, file=sys.stderr, flush=True)
+                raise RuntimeError(self.image_error) from None
             if process.returncode:
-                self.image_error = 'IMAGE_RESOLUTION_FAILED'
-                try:
-                    error = json.loads(process.stderr.strip().splitlines()[-1]).get('error', '')
-                    if re.fullmatch(r'IMAGE_[A-Z_]{3,80}', error):
-                        self.image_error = error
-                except (ValueError, IndexError):
-                    pass
+                self.image_error, details = image_worker_failure(process.stderr)
+                print('Image resolution failed: ' + self.image_error + (' ' + details if details else ''), file=sys.stderr, flush=True)
                 raise RuntimeError(self.image_error)
             result = json.loads(process.stdout.strip().splitlines()[-1])
             if not result.get('b64'):
@@ -606,7 +624,8 @@ def serve(reader, port, token):
             except PermissionError:
                 self.respond({'success': False, 'error': 'Conversation is not selected'}, 403)
             except Exception as error:
-                self.respond({'success': False, 'error': 'Reader query failed: ' + type(error).__name__}, 503)
+                image_failure = re.fullmatch(r'/api/v1/images/[a-f0-9]{64}', url.path) and isinstance(error, RuntimeError) and re.fullmatch(r'IMAGE_[A-Z_]{3,80}', str(error))
+                self.respond({'success': False, 'error': str(error) if image_failure else 'Reader query failed: ' + type(error).__name__}, 503)
 
         def do_POST(self):
             supplied = self.headers.get('Authorization', '').removeprefix('Bearer ')

@@ -1,6 +1,6 @@
 {
   "name": "wechatagent-desktop",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "WeChatAgent Windows desktop console",
   "productName": "WeChatAgent",

@@ -9,14 +9,27 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+# Embedded Python uses an isolated _pth file and does not add the script directory.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 sys.path.insert(0, str(ROOT / 'components' / 'weflow-cli' / 'scripts'))
-import wechat_media as media
-from wechat_sticker import resolve_sticker
-from PIL import Image, ImageOps
-
-spec = importlib.util.spec_from_file_location('reader_api_image', ROOT / 'scripts' / 'reader-api.py')
-reader_api = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(reader_api)
+try:
+    import wechat_media as media
+    from wechat_sticker import resolve_sticker
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    import subprocess
+    spec = importlib.util.spec_from_file_location('reader_api_image', ROOT / 'scripts' / 'reader-api.py')
+    reader_api = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reader_api)
+except (ImportError, OSError) as error:
+    if __name__ != '__main__':
+        raise
+    code = 'IMAGE_DEPENDENCY_MISSING' if isinstance(error, ModuleNotFoundError) else 'IMAGE_DEPENDENCY_LOAD_FAILED'
+    result = {'success': False, 'error': code, 'exceptionType': type(error).__name__}
+    name = getattr(error, 'name', '') or ''
+    if re.fullmatch(r'[A-Za-z0-9_.]{1,80}', name):
+        result['module'] = name
+    print(json.dumps(result), file=sys.stderr)
+    sys.exit(1)
 
 
 def normalize_image(raw, animated=False):
@@ -133,11 +146,34 @@ def resolve(descriptor):
     raise RuntimeError('IMAGE_LOCAL_COPY_UNAVAILABLE')
 
 
+def image_error_code(error):
+    if isinstance(error, RuntimeError) and re.fullmatch(r'IMAGE_[A-Z_]{3,80}', str(error)):
+        return str(error)
+    if isinstance(error, RuntimeError) and str(error) == 'NORMALIZED_IMAGE_TOO_LARGE':
+        return 'IMAGE_NORMALIZED_TOO_LARGE'
+    if isinstance(error, (UnidentifiedImageError, EOFError)):
+        return 'IMAGE_FORMAT_UNSUPPORTED'
+    if isinstance(error, PermissionError):
+        return 'IMAGE_FILE_ACCESS_DENIED'
+    if isinstance(error, FileNotFoundError):
+        return 'IMAGE_LOCAL_FILE_MISSING'
+    if isinstance(error, subprocess.TimeoutExpired):
+        return 'IMAGE_DECODE_TIMEOUT'
+    if isinstance(error, (MemoryError, Image.DecompressionBombError)):
+        return 'IMAGE_PIXEL_LIMIT'
+    if isinstance(error, (json.JSONDecodeError, KeyError, TypeError)):
+        return 'IMAGE_DESCRIPTOR_INVALID'
+    return 'IMAGE_RESOLUTION_FAILED'
+
+
 if __name__ == '__main__':
     try:
-        descriptor = json.loads(sys.stdin.read(16384))
-        print(json.dumps({'success': True, **resolve(descriptor)}))
+        if sys.argv[1:] == ['--check-runtime']:
+            print(json.dumps({'success': True, 'imageWorkerReady': True}))
+        else:
+            descriptor = json.loads(sys.stdin.read(16384))
+            print(json.dumps({'success': True, **resolve(descriptor)}))
     except Exception as error:
-        code = str(error) if isinstance(error, RuntimeError) else 'IMAGE_RESOLUTION_FAILED'
-        print(json.dumps({'success': False, 'error': code}), file=sys.stderr)
+        print(json.dumps({'success': False, 'error': image_error_code(error),
+                         'exceptionType': type(error).__name__}), file=sys.stderr)
         sys.exit(1)

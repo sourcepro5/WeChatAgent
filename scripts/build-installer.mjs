@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { buildIcons, embedExecutableIcon } from './build-icons.mjs';
 import { projectRoot as root } from './project-config.mjs';
 
 const version = JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).version;
@@ -48,9 +49,9 @@ function addTree(relative, allow) {
   for (const name of fs.readdirSync(path.join(project, relative), { recursive: true })) if (fs.statSync(path.join(project, relative, name)).isFile()) files.push((relative + '/' + name).replaceAll('\\', '/'));
 }
 
-for (const name of ['package.json','main.cjs','preload.cjs','desktop-policy.cjs','deployment.cjs','loading-preload.cjs','loading.html','loading.css','loading.js']) copyFile(path.join(root, 'apps/console-desktop', name), path.join(appDir, name));
+for (const name of ['package.json','main.cjs','preload.cjs','desktop-policy.cjs','deployment.cjs','appearance.cjs', 'loading-preload.cjs','loading.html','loading.css','loading.js']) copyFile(path.join(root, 'apps/console-desktop', name), path.join(appDir, name));
 fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({ name: 'wechatagent', productName: 'WeChatAgent', version, description: 'WeChatAgent desktop console', main: 'main.cjs', author: 'WeChatAgent contributors', license: 'SEE THIRD-PARTY-NOTICES.txt' }, null, 2));
-for (const name of ['icon.png','icon.ico']) copyFile(path.join(root, 'release/WeChatAgent/resources/app', name), path.join(appDir, name));
+await buildIcons(root, appDir, require('sharp'));
 for (const name of ['LICENSE','LICENSES.md']) add(name);
 add('config/wechatagent.example.json');
 const presetNames = fs.readdirSync(path.join(root, 'roles')).filter(name => name.endsWith('.md') && name !== 'README.md');
@@ -131,9 +132,10 @@ await build({ targets:Platform.WINDOWS.createTarget('nsis', Arch.x64), config: {
   directories:{app:appDir, output:path.join(root,'release','installer'), buildResources:appDir},
   electronDist:path.join(root,'node_modules/electron/dist'), electronVersion:'41.1.1',
   asar:false, npmRebuild:false, buildDependenciesFromSource:false, files:['**/*'],
+  afterPack: async context => embedExecutableIcon(path.join(context.appOutDir, 'WeChatAgent.exe'), path.join(appDir, 'icon.ico'), require('resedit')),
   extraResources:[{from:project,to:'project'},{from:path.join(stage,'runtime'),to:'runtime',filter:['**/*','!**/__pycache__/**','!**/*.pyc']},{from:vendor,to:'vendor'}],
   win:{target:['nsis'], icon:path.join(appDir,'icon.ico'), signAndEditExecutable:false, requestedExecutionLevel:'asInvoker'},
-  nsis:{oneClick:false, perMachine:false, allowElevation:false, allowToChangeInstallationDirectory:true, createDesktopShortcut:true, createStartMenuShortcut:true, deleteAppDataOnUninstall:false, differentialPackage:false, runAfterFinish:false, installerLanguages:['zh_CN','en_US'], language:'2052', license:path.join(appDir,'LICENSE.txt')},
+  nsis:{installerIcon:path.join(appDir,'icon.ico'), uninstallerIcon:path.join(appDir,'icon.ico'), oneClick:false, perMachine:false, allowElevation:false, allowToChangeInstallationDirectory:true, createDesktopShortcut:true, createStartMenuShortcut:true, deleteAppDataOnUninstall:false, differentialPackage:false, runAfterFinish:false, installerLanguages:['zh_CN','en_US'], language:'2052', license:path.join(appDir,'LICENSE.txt')},
   compression:'normal', publish:null,
 } });
 console.log('Installer built in release/installer');

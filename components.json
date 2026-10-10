@@ -1,6 +1,6 @@
 {
   "project": "WeChatAgent",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "distribution": "source-only",
   "components": [
     {
@@ -31,7 +31,7 @@
     {
       "name": "WeChatAgent Desktop",
       "directory": "apps/console-desktop",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "notes": "Independent build dependencies are pinned in the root package; no historical WeFlow tree required."
     }
   ],

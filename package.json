@@ -1,6 +1,6 @@
 {
   "name": "wechatagent",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Personal WeChat AI friend with NT reader, WeChat-Hook, OneBot v11 and an existing DSH Desktop",
@@ -35,6 +35,7 @@
     "7zip-bin": "5.2.0",
     "electron": "41.1.1",
     "electron-builder": "26.8.1",
-    "sharp": "0.34.5"
+    "sharp": "0.34.5",
+    "resedit": "1.7.2"
   }
 }
