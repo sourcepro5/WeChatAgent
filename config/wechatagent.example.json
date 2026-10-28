@@ -118,6 +118,7 @@
     "batch_ms": 3000,
     "min_interval_ms": 15000,
     "private_min_interval_ms": 1000,
+    "direct_min_interval_ms": 1500,
     "max_per_minute": 3,
     "max_per_ten_minutes": 10
   },

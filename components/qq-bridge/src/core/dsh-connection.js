@@ -3,7 +3,7 @@ export class DshConnectionGuard {
   constructor({buffer,probe,now=Date.now,log=()=>{},pollMs=2000}) {
     Object.assign(this,{buffer,probe,now,log,pollMs});
     this.saved=buffer.dshConnection;this.ready=false;this.initialized=false;this.epoch=this.saved?.epoch??0;
-    this.cutoff=this.saved?.cutoff??0;this.instanceId=this.saved?.instanceId??'';this.lastCheck=-Infinity;this.stopped=false;
+    this.cutoff=this.saved?.cutoff??0;this.instanceId=this.saved?.instanceId??'';this.lastCheck=-Infinity;this.stopped=false;this.failures=0;
   }
   current(epoch){return !this.stopped&&this.ready&&epoch===this.epoch;}
   skips(message){return !this.ready||Number(message.timestamp)*1000<this.cutoff;}
@@ -16,8 +16,14 @@ export class DshConnectionGuard {
     this.checking=(async()=>{
       let health;try{health=await this.probe();}catch{health={ready:false};}
       if(this.stopped)return false;
+      const healthy=health?.ready===true;
+      if(this.ready&&!healthy&&++this.failures<3){
+        this.lastCheck=this.now();
+        return this.ready;
+      }
+      if(healthy)this.failures=0;
       const previous=this.initialized?this.buffer.dshConnection:this.saved;
-      const online=health?.ready===true,id=online?(health.instanceId||'legacy'):(previous?.instanceId??'');
+      const online=healthy,id=online?(health.instanceId||'legacy'):(previous?.instanceId??'');
       const boundary=!this.initialized?(!previous||previous.ready!==online||online&&previous.instanceId!==id):this.ready!==online||online&&this.instanceId!==id;
       this.ready=online;this.initialized=true;this.lastCheck=this.now();
       if(boundary){

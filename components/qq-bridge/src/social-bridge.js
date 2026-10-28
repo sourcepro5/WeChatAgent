@@ -69,6 +69,7 @@ const engine = new SocialEngine({ buffer,connection, roleFor: key => personaFor(
   mode: wechat.wake_mode ?? 'hybrid',modeFor, batchMs: config.social?.batch_ms ?? 3000,
   minIntervalMs: config.social?.min_interval_ms ?? 15000,
   privateMinIntervalMs: config.social?.private_min_interval_ms ?? 1000,
+  directMinIntervalMs: config.social?.direct_min_interval_ms ?? 1500,
   maxPerMinute: config.social?.max_per_minute ?? 3,
   maxPerTenMinutes: config.social?.max_per_ten_minutes ?? 10,
   decide: (key, prompt, metadata) => plugin.followup(key, prompt, metadata),

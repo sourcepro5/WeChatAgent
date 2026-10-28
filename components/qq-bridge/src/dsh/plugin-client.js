@@ -14,7 +14,7 @@ export class DshPluginClient {
   }
 
   async connectionHealth({projectRoot,accountScope}={}){
-    const response=await fetch(this.url+'/health',{headers:{authorization:'Bearer '+this.token},signal:AbortSignal.timeout(2000)});
+    const response=await fetch(this.url+'/health',{headers:{authorization:'Bearer '+this.token},signal:AbortSignal.timeout(10000)});
     const health=await response.json();
     const sameRoot=!projectRoot||typeof health.projectRoot==='string'&&path.resolve(health.projectRoot).toLowerCase()===path.resolve(projectRoot).toLowerCase();
     return {ready:response.ok&&health.ok===true&&health.project==='WeChatAgent'&&health.contextMode==='native-session-v1'&&sameRoot&&(!accountScope||health.accountScope===accountScope),instanceId:health.instanceId,startedAt:health.instanceStartedAt};

@@ -72,11 +72,13 @@ export function buildSocialPrompt({ key, rows, role, direct, lastReplyAt, previo
   const history = rows.map(row=>chatLine(row,true)).join('\n');
   const ago = lastReplyAt ? `${Math.round((Date.now() - lastReplyAt) / 60000)} 分钟前` : '还没有发言';
   const chatName = quote(rows.at(-1)?.conversation_name ?? key);
+  const senders = new Set(rows.map(row => row.sender_name ?? row.sender_id).filter(Boolean));
+  const multiSpeaker = direct && senders.size > 1 ? '\n本批有多人同时说话；可以分成两段，每段开头点名，段间空一行。' : '';
   return '新的群聊消息。沿用当前 DSH session 的稳定人格。\n' +
     `微信群：${chatName}（${key}）。你上次发言：${ago}。${direct ? rows.some(row=>row.interaction==='pat') ? '本批有拍一拍提醒，结合连带文字判断是否在叫你接话。' : rows.some(row=>normalizeQuoteReply(row.quoteReply)?.reference.senderRelation==='self') ? '本批有人引用本账号的发言，结合新回复和上下文判断如何接话。' : '有人直接@你或使用唤醒词；若安全允许，应直接简短回应。' : '这是一批普通群消息。'}\n` +
     previousReplyContext(previousReply) +
     `<untrusted_chat>\n${history}\n</untrusted_chat>\n` +
-    patReaction(rows) + forwardedRecordNotice(rows) + quoteReplyNotice(rows);
+    patReaction(rows) + forwardedRecordNotice(rows) + quoteReplyNotice(rows) + multiSpeaker;
 }
 
 export function buildPrivatePrompt({ key, rows, role, previousReply }) {
@@ -107,13 +109,14 @@ export function replyCooldown(recent, now, { intervalMs, maxPerMinute, maxPerTen
 /** Batched social decisions; one in-flight decision per conversation. */
 export class SocialEngine {
   constructor({ buffer, decide, send, roleFor = () => '', personaNameFor = () => '',workModeFor=()=> 'social', wakeWords = [], mode = 'hybrid',
-    assistantBatchMs=650,assistantChatOnly=false,maxTextPartsFor=()=>2,notebookEnabledFor=()=>false,batchMs = 3000, minIntervalMs = 15000, privateMinIntervalMs = 1000,
+    assistantBatchMs=650,assistantChatOnly=false,maxTextPartsFor=()=>2,notebookEnabledFor=()=>false,batchMs = 3000, minIntervalMs = 15000, privateMinIntervalMs = 1000, directMinIntervalMs = 1500,
     maxPerMinute = 3, maxPerTenMinutes = 10, stickerChoicesFor = async()=>[], sendSticker,
     stickerPolicyFor=()=>({enabled:true,labelCache:true}),stickerLabelsFor=async()=>[],saveStickerLabels=async()=>{},
     assistantAccess=()=>false,assistantControl,modeFor,searchFor=async()=>null,modelSearchReady=async()=>false,searchPolicyFor=()=>SEARCH_DEFAULTS,stickerSelect=selectStickerChoices,deliveryRetry={},connection=null,log = () => {} }) {
     Object.assign(this, { buffer, decide, send, roleFor, personaNameFor,workModeFor, wakeWords, mode, batchMs,
-      minIntervalMs, privateMinIntervalMs, maxPerMinute, maxPerTenMinutes, log });
+      minIntervalMs, privateMinIntervalMs, directMinIntervalMs, maxPerMinute, maxPerTenMinutes, log });
     if (![maxPerMinute,maxPerTenMinutes].every(value => Number.isSafeInteger(value) && value > 0)) throw new TypeError('Reply quotas must be positive integers');
+    if (!Number.isSafeInteger(directMinIntervalMs) || directMinIntervalMs < 0) throw new TypeError('Direct reply interval must be a non-negative integer');
     this.connection=connection;if(connection)connection.onBoundary=()=>this.suspendConnection();
     this.assistantChatOnly=assistantChatOnly;this.assistantBatchMs=assistantBatchMs;this.modeFor=modeFor??(()=>this.mode);this.assistantControl=assistantControl;this.assistantAccess=assistantAccess;
     this.maxTextPartsFor=maxTextPartsFor;this.notebookEnabledFor=notebookEnabledFor;
@@ -240,7 +243,7 @@ export class SocialEngine {
       if(this.connection&&!await this.connection.check({force:true})){this.suspendConnection();return;}
       const dispatchEpoch=this.connection?.epoch;
       const decideCurrent=async(...args)=>{
-        if(this.connection&&(!await this.connection.check({force:true})||!this.connection.current(dispatchEpoch)))throw Error('DSH_CONNECTION_CHANGED');
+        if(this.connection&&!this.connection.current(dispatchEpoch))throw Error('DSH_CONNECTION_CHANGED');
         return this.decide(...args);
       };
       const queued=this.decisions.get(key);
@@ -289,7 +292,7 @@ export class SocialEngine {
       const now = Date.now();
       const recent = times.filter((t) => now - t < 600000);
       this.sentAt.set(key, recent);
-      const interval = message.kind === 'private' ? this.privateMinIntervalMs : this.minIntervalMs;
+      const interval = message.kind === 'private' ? this.privateMinIntervalMs : direct ? Math.min(this.minIntervalMs, this.directMinIntervalMs) : this.minIntervalMs;
       const { readyAt, reason } = replyCooldown(recent,now,{intervalMs:interval,maxPerMinute:this.maxPerMinute,maxPerTenMinutes:this.maxPerTenMinutes});
       if (readyAt > now) {
         const delay = readyAt-now+1;
