@@ -1,5 +1,6 @@
 import {validateAssistantSettings} from './assistant-policy.mjs';
 import {validateReplyLayout} from './reply-layout-policy.mjs';
+import {validateTimeZone} from './time-zone-policy.mjs';
 const KEY=/^wechat:(private|group):[1-9]\d{0,15}$/;
 export const validChatKey=value=>typeof value==='string'&&KEY.test(value)&&Number.isSafeInteger(Number(value.split(':')[2]));
 export const allowedConversation=(wechat,key)=>validChatKey(key)&&(wechat?.whitelist?.[key.split(':')[1]==='group'?'groups':'private']??[]).some(id=>String(id)===key.split(':')[2]);
@@ -8,6 +9,7 @@ export const validDshAccess=value=>value&&typeof value==='object'&&!Array.isArra
 export function validateConversationSettings(wechat){
   validateAssistantSettings(wechat);
   validateReplyLayout(wechat?.replyLayout);
+  validateTimeZone(wechat?.time_zone);
   const workModes=wechat?.workModes;
   if(workModes!==undefined&&(!workModes||typeof workModes!=='object'||Array.isArray(workModes)||Object.entries(workModes).some(([key,mode])=>!validChatKey(key)||!['social','assistant'].includes(mode))))throw Error('Invalid per-chat work mode');
   const saved=wechat?.modeSettings;

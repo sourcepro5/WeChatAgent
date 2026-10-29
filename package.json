@@ -35,6 +35,7 @@
     "test:startup": "node --test scripts/test-adapter-startup.mjs scripts/test-hook-startup.mjs scripts/test-process-recovery.mjs scripts/test-hook-repair-api.mjs",
     "test:reply-protocol": "node --test scripts/test-reply-protocol.mjs",
     "test:prompt-policy": "node --test scripts/test-prompt-policy.mjs",
+    "test:time-zone": "node --test scripts/test-time-zone.mjs",
     "test:persona-delete": "node --test scripts/test-persona-delete.mjs",
     "test:external-dsh": "node --test scripts/test-external-dsh.mjs",
     "test:wechat-account": "node --test scripts/test-wechat-account-check.mjs scripts/test-reader-account-state.mjs scripts/test-hook-startup.mjs",

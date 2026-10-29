@@ -1,0 +1,33 @@
+// 控制台时区下拉优先展示的常用时区；其余时区由面板按 IANA 区域动态补全
+export const TIME_ZONE_PRESETS = [
+  ['', '跟随默认：北京时间'],
+  ['Asia/Shanghai', '中国 · 北京'],
+  ['Asia/Hong_Kong', '中国 · 香港'],
+  ['Asia/Taipei', '中国 · 台北'],
+  ['Asia/Tokyo', '日本 · 东京'],
+  ['Asia/Seoul', '韩国 · 首尔'],
+  ['Asia/Singapore', '新加坡'],
+  ['Asia/Bangkok', '泰国 · 曼谷'],
+  ['Asia/Kolkata', '印度 · 加尔各答'],
+  ['Asia/Dubai', '阿联酋 · 迪拜'],
+  ['Europe/London', '英国 · 伦敦'],
+  ['Europe/Paris', '法国 · 巴黎'],
+  ['Europe/Berlin', '德国 · 柏林'],
+  ['Europe/Madrid', '西班牙 · 马德里'],
+  ['Europe/Moscow', '俄罗斯 · 莫斯科'],
+  ['America/New_York', '美国 · 纽约（东部）'],
+  ['America/Chicago', '美国 · 芝加哥（中部）'],
+  ['America/Denver', '美国 · 丹佛（山地）'],
+  ['America/Los_Angeles', '美国 · 洛杉矶（太平洋）'],
+  ['America/Vancouver', '加拿大 · 温哥华'],
+  ['America/Sao_Paulo', '巴西 · 圣保罗'],
+  ['Australia/Perth', '澳洲 · 珀斯'],
+  ['Australia/Adelaide', '澳洲 · 阿德莱德'],
+  ['Australia/Brisbane', '澳洲 · 布里斯班'],
+  ['Australia/Sydney', '澳洲 · 悉尼'],
+  ['Australia/Melbourne', '澳洲 · 墨尔本'],
+  ['Pacific/Auckland', '新西兰 · 奥克兰'],
+  ['UTC', 'UTC（协调世界时）'],
+];
+
+export const DEFAULT_TIME_ZONE = 'Asia/Shanghai';
