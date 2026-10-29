@@ -1,7 +1,7 @@
 ﻿param([string]$MsBuild = '', [string]$BuildDirectory = '', [string]$OutputDirectory = '', [string]$TargetVersion = '4.1.10.27', [string]$HeadersRoot = '')
 $ErrorActionPreference = 'Stop'
 if ($TargetVersion -eq '4.1.15.13') {
-    & (Join-Path $PSScriptRoot 'build-hook-current.ps1') -HeadersRoot $HeadersRoot
+    & (Join-Path $PSScriptRoot 'build-hook-current.ps1') -HeadersRoot $HeadersRoot -BuildDirectory $BuildDirectory -OutputDirectory $OutputDirectory
     exit
 }
 if ($TargetVersion -ne '4.1.10.27') { throw 'Unsupported native Hook profile.' }

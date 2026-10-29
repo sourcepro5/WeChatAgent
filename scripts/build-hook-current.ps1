@@ -1,4 +1,4 @@
-param([string]$HeadersRoot = '',[string]$VcVars = '')
+param([string]$HeadersRoot = '',[string]$VcVars = '',[string]$BuildDirectory = '',[string]$OutputDirectory = '')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 if (-not $HeadersRoot) { $HeadersRoot = Join-Path $root 'components\WeChat-Hook' }
@@ -16,20 +16,27 @@ if (-not $VcVars) {
     $VcVars = Join-Path $installation 'VC\Auxiliary\Build\vcvars64.bat'
 }
 if (-not (Test-Path -LiteralPath $VcVars)) { throw 'VC x64 environment script not found.' }
+$build = Join-Path $root 'state\hook\build-4.1.15.13'
 $output = Join-Path $root 'state\hook\native-4.1.15.13'
-New-Item -ItemType Directory -Path $output -Force | Out-Null
+foreach ($taskOverride in @(@{value=$BuildDirectory;name='build'},@{value=$OutputDirectory;name='output'})) {
+    if (-not $taskOverride.value) { continue }
+    $taskPath = if ([IO.Path]::IsPathRooted($taskOverride.value)) { [IO.Path]::GetFullPath($taskOverride.value) } else { [IO.Path]::GetFullPath((Join-Path $root $taskOverride.value)) }
+    if (-not $taskPath.StartsWith(([IO.Path]::GetFullPath((Join-Path $root 'state'))+'\'),[StringComparison]::OrdinalIgnoreCase)) { throw 'Custom build paths must stay inside this project state directory.' }
+    if ($taskOverride.name -eq 'build') { $build=$taskPath } else { $output=$taskPath }
+}
+New-Item -ItemType Directory -Path $build,$output -Force | Out-Null
 $source = Join-Path $PSScriptRoot 'native-hook'
-foreach ($value in @($root,$HeadersRoot,$vcvars)) {
+foreach ($value in @($root,$HeadersRoot,$vcvars,$build,$output)) {
     if ($value -match '[%"\r\n]') { throw 'Build paths may not contain command expansion characters.' }
 }
 $commands = @(
     '@echo off',
     ('call "'+$vcvars+'" >nul'),
     'if errorlevel 1 exit /b 1',
-    ('cd /d "'+$output+'"'),
-    ('cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 /LD /I"'+(Join-Path $HeadersRoot 'include')+'" /I"'+(Join-Path $HeadersRoot '3rdparty\httplib')+'" "'+(Join-Path $source 'text_4_1_15_13.cpp')+'" /link version.lib ws2_32.lib /out:wechatagent-text-4.1.15.13.dll'),
+    ('cd /d "'+$build+'"'),
+    ('cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 /LD /I"'+(Join-Path $HeadersRoot 'include')+'" /I"'+(Join-Path $HeadersRoot '3rdparty\httplib')+'" "'+(Join-Path $source 'text_4_1_15_13.cpp')+'" /link version.lib ws2_32.lib /out:"'+(Join-Path $output 'wechatagent-text-4.1.15.13.dll')+'"'),
     'if errorlevel 1 exit /b 1',
-    ('cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 "'+(Join-Path $source 'text_loader.cpp')+'" /link /out:wechatagent-text-loader.exe'),
+    ('cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 "'+(Join-Path $source 'text_loader.cpp')+'" /link /out:"'+(Join-Path $output 'wechatagent-text-loader.exe')+'"'),
     'exit /b %errorlevel%'
 )
 $commandFile = Join-Path $output 'build.cmd'

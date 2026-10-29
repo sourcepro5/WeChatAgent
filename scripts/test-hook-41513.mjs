@@ -26,6 +26,17 @@ test('profiles keep the old backend intact and advertise current native API exte
   config.hook.expectedVersion='4.1.15.14';assert.throws(()=>validateConfig(config),/exactly matching/);
 });
 
+test('unreviewed versions, inherited property names and nonstrings cannot select a native profile',()=>{
+ for(const version of ['4.1.15.56','4.1.15.14','constructor','toString','__proto__',null,undefined,123,{},[]]){
+  assert.equal(hookProfile(version),null);
+ }
+ const config=JSON.parse(fs.readFileSync(path.join(root,'config/wechatagent.example.json'),'utf8'));
+ for(const version of ['4.1.15.56','constructor','toString','__proto__']){
+  assert.throws(()=>validateConfig({...config,hook:{...config.hook,expectedVersion:version}}),/exactly matching/);
+  assert.equal(hookAccountProblem({...health,version},'wxid_fixture',version),'HOOK_VERSION_MISMATCH');
+ }
+});
+
 test('current health checks the mapped profile, construction readiness, exact version and account',()=>{
   assert.equal(hookAccountProblem(health,'wxid_fixture','4.1.15.13'),'');
   assert.equal(hookAccountProblem({...health,profile:undefined},'wxid_fixture','4.1.15.13'),'HOOK_INITIALIZATION_PENDING');

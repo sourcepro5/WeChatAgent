@@ -10,7 +10,7 @@ assert.deepEqual(example.wechat.whitelist, { groups: [], private: [] });
 assert.throws(() => validateConfig({ ...example, ports: { ...example.ports, onebot: example.ports.weflow } }), /distinct/);
 assert.throws(() => validateConfig({ ...example, persona: { default: '../bad' } }), /persona/);
 assert.throws(() => validateConfig({ ...example, hook: { ...example.hook, baseUrl: 'http://0.0.0.0:30001' } }), /loopback/);
-assert.throws(() => validateConfig({ ...example, hook: { ...example.hook, expectedVersion: '4.1.15.13' } }), /matching/);
+assert.throws(() => validateConfig({ ...example, hook: { ...example.hook, expectedVersion: '4.1.15.56' } }), /matching/);
 const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'WeChatAgent portable '));
 try {
   fs.mkdirSync(path.join(fixture, 'config')); fs.mkdirSync(path.join(fixture, 'roles'));

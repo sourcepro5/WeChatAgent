@@ -64,7 +64,8 @@
     "test:voice-codec": "node --test scripts/test-voice-codec.mjs",
     "test:speech-protocol": "node --test scripts/test-speech-protocol.mjs",
     "test:release-version": "node --test scripts/test-release-version.mjs scripts/test-public-update-check.mjs",
-    "test:sessions": "node --test scripts/test-dsh-sessions-cli.mjs"
+    "test:sessions": "node --test scripts/test-dsh-sessions-cli.mjs",
+    "test:hook-41513": "node --test scripts/test-hook-41513.mjs scripts/test-hook-native-apis-41513.mjs"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",
