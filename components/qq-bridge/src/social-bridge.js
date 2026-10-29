@@ -2,6 +2,7 @@ import {pluginEnabled,configuration as pluginConfiguration} from '../../../packa
 import {writeVoiceAttempt} from '../../../packages/plugin-api/voice-status.mjs';
 import {VoiceIngress} from './core/voice-ingress.js';
 import {replyMessageLimit} from '../../../packages/dsh-social-bridge-plugin/reply-layout-policy.mjs';
+import {timeZoneOf} from '../../../packages/dsh-social-bridge-plugin/time-zone-policy.mjs';
 import {AssistantFeedback} from '../../../packages/dsh-social-bridge-plugin/assistant-feedback.mjs';
 import {createAssistantNoticeDelivery} from './core/assistant-notice-delivery.js';
 import fs from 'node:fs';
@@ -49,7 +50,9 @@ const plugin = new DshPluginClient({...config.dsh_plugin,feedback:new AssistantF
 import {assistantSenderAllowed,assistantGroupChatAllowed,verifiedAssistantSender} from '../../../packages/dsh-social-bridge-plugin/assistant-policy.mjs';
 import {conversationMode,conversationWorkMode} from '../../../packages/dsh-social-bridge-plugin/conversation-policy.mjs';
 const workModeFor=key=>conversationWorkMode(config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat,key);
+const liveWechat=()=>config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'')).wechat:wechat;
 const modeFor=key=>conversationMode(config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat,key);
+const timeZoneFor=()=>timeZoneOf(liveWechat());
 const searchPolicyFor=key=>searchPolicy(config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat,key);
 const searchStateFor=async message=>{
   const key=buildConversationKey(message.platform,message.kind,message.conversation_id);
@@ -66,7 +69,7 @@ const connection=new DshConnectionGuard({buffer,probe:()=>plugin.connectionHealt
 const engine = new SocialEngine({ buffer,connection, roleFor: key => personaFor(key).persona,
   personaNameFor: key => personaFor(key).personaName,workModeFor,assistantControl:(key,action,message,command)=>plugin.assistantTask(key,action,{...command,senderWxid:verifiedAssistantSender(message)}),assistantAccess:(key,message)=>assistantSenderAllowed((config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat),key,verifiedAssistantSender(message)),
   wakeWords: wechat.wake_words ?? [],
-  mode: wechat.wake_mode ?? 'hybrid',modeFor, batchMs: config.social?.batch_ms ?? 3000,
+  mode: wechat.wake_mode ?? 'hybrid',modeFor, timeZoneFor, batchMs: config.social?.batch_ms ?? 3000,
   minIntervalMs: config.social?.min_interval_ms ?? 15000,
   privateMinIntervalMs: config.social?.private_min_interval_ms ?? 1000,
   maxPerMinute: config.social?.max_per_minute ?? 3,
