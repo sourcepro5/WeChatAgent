@@ -20,6 +20,7 @@ import {validateMemberMemory} from '../packages/dsh-social-bridge-plugin/member-
 
 import {validateConversationSettings,conversationMode} from '../packages/dsh-social-bridge-plugin/conversation-policy.mjs';
 import {migrateDshSettings} from '../packages/dsh-social-bridge-plugin/dsh-migration.mjs';
+import {hookProfile} from './hook-profiles.mjs';
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const write = (file, value) => {
@@ -45,7 +46,7 @@ export function validateConfig(config) {
     if ((config.runtime.weflowMode ?? 'nt') !== 'nt') throw new Error('WeChat-Hook requires the NT reader for account and receipt checks');
     const url = new URL(config.hook?.baseUrl ?? '');
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Hook API must be an HTTP loopback base URL');
-    if (config.hook.expectedVersion !== '4.1.10.27' || !config.hook.wechatExecutable || /[\r\n"\0]/.test(config.hook.wechatExecutable)) throw new Error('Configure the matching WeChat-Hook executable and version 4.1.10.27');
+    if (!hookProfile(config.hook.expectedVersion) || !config.hook.wechatExecutable || /[\r\n"\0]/.test(config.hook.wechatExecutable)) throw new Error('Configure a supported, exactly matching WeChat-Hook executable and version');
     for (const [key, low, high] of [['requestTimeoutMs',1000,5000],['receiptTimeoutMs',1000,18000],['maxConcurrentSends',1,4]]) {
       const value = config.hook[key];
       if (!Number.isInteger(value) || value < low || value > high) throw new Error('Invalid Hook ' + key);

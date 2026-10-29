@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {readerAccountDirectory} from './reader-account-state.mjs';
+import {hookProfile} from './hook-profiles.mjs';
 
 const failure=code=>Object.assign(new Error(code),{code});
 const transient=new Set(['HOOK_NOT_LISTENING','HOOK_HEALTH_TIMEOUT','HOOK_HEALTH_FAILED','HOOK_LOGIN_REQUIRED','HOOK_INITIALIZATION_PENDING']);
@@ -12,7 +13,8 @@ export function hookAccountProblem(health,expectedAccount,expectedVersion='4.1.1
   if(typeof expectedAccount!=='string'||!expectedAccount)return 'HOOK_ACCOUNT_METADATA_INVALID';
   if(!health||typeof health!=='object')return 'HOOK_HEALTH_INVALID_RESPONSE';
   if(health.integration!=='WeChatAgent-1'||health.backend!=='wechat-hook')return 'REVIEWED_HOOK_BUILD_REQUIRED';
-  if(health.version!==expectedVersion||health.version!=='4.1.10.27')return 'HOOK_VERSION_MISMATCH';
+  if(health.version!==expectedVersion||!hookProfile(health.version))return 'HOOK_VERSION_MISMATCH';
+  if(expectedVersion==='4.1.15.13'&&(health.profile!=='4.1.15.13-text-v1'||health.nativeTextSend!==true))return 'HOOK_INITIALIZATION_PENDING';
   if(health.startupState!==undefined&&health.startupState!=='ready')return 'HOOK_INITIALIZATION_PENDING';
   if(!Array.isArray(health.databaseAccounts)||health.databaseAccounts.some(account=>typeof account!=='string'||!account))return 'HOOK_ACCOUNT_METADATA_INVALID';
   if(!health.databaseAccounts.length)return 'HOOK_LOGIN_REQUIRED';

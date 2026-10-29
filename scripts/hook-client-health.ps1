@@ -17,6 +17,7 @@ function Wait-HookClient([string]$Executable,[string]$BaseUrl,[string]$ExpectedV
         if($health){
             if($health.integration -ne 'WeChatAgent-1' -or $health.backend -ne 'wechat-hook'){throw 'HOOK_HEALTH_INVALID_RESPONSE'}
             if($health.version -ne $ExpectedVersion){throw 'HOOK_VERSION_MISMATCH'}
+            if($ExpectedVersion -eq '4.1.15.13' -and ($health.profile -ne '4.1.15.13-text-v1' -or $health.nativeTextSend -ne $true)){throw 'HOOK_PROFILE_MISMATCH'}
             if([int]$health.pid -notin @($matching | ForEach-Object {[int]$_.ProcessId})){
                 # The launcher can hand over between the snapshot and HTTP reply.
                 $matching=@(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object { $_.ExecutablePath -eq $Executable -and $_.CommandLine -notmatch '--type=|--crashpad-handler' })
