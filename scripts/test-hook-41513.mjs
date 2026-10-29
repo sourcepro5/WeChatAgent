@@ -13,10 +13,12 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const health={integration:'WeChatAgent-1',backend:'wechat-hook',version:'4.1.15.13',
   profile:'4.1.15.13-text-v1',startupState:'ready',nativeTextSend:true,nativeStickerSend:false,databaseAccounts:['wxid_fixture']};
 
-test('profiles keep the old backend intact and explicitly mark current text-only support',()=>{
+test('profiles keep the old backend intact and advertise current native API extensions separately',()=>{
   assert.equal(hookProfile('4.1.10.27').loader,'version-proxy');
   assert.equal(hookProfile('4.1.15.13').loader,'explicit-text');
   assert.equal(hookProfile('4.1.15.13').nativeSticker,false);
+  assert.equal(hookProfile('4.1.15.13').nativeImageApi,true);
+  assert.equal(hookProfile('4.1.15.13').nativeMentionApi,true);
   assert.equal(hookProfile('4.1.15.14'),null);
   const config=JSON.parse(fs.readFileSync(path.join(root,'config/wechatagent.example.json'),'utf8'));
   validateConfig(config);
@@ -77,7 +79,7 @@ test('current source keeps exact ABI checks, no UI fallback and no machine-speci
   const native=fs.readFileSync(path.join(root,'scripts/native-hook/text_4_1_15_13.cpp'),'utf8');
   assert.match(native,/SizeOfImage!=ImageSize/);assert.match(native,/base\+SenderTable\+16/);
   assert.match(native,/message\)\+0x758,text/);assert.match(native,/GuardProbe\(\)/);
-  assert.match(native,/nativeImageSend",false/);assert.match(native,/nativeStickerSend",false/);
+  assert.match(native,/nativeImageSend",probeReady/);assert.match(native,/nativeStickerSend",false/);
   assert.doesNotMatch(native,/D:\\\\|QQAgent|SendInput\(|SetForegroundWindow\(|mouse_event\(|keybd_event\(/);
   assert.match(native,/server\.listen\("127\.0\.0\.1",port\)/);
 });

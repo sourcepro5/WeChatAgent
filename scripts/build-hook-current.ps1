@@ -37,10 +37,10 @@ $commandFile = Join-Path $output 'build.cmd'
 & $env:ComSpec /d /c ('"'+$commandFile+'"')
 if ($LASTEXITCODE -ne 0) { throw 'Current-version native text build failed.' }
 $manifest = @{
-    targetVersion='4.1.15.13'; profile='4.1.15.13-text-v1'; integration='WeChatAgent-1';
-    nativeTextSend=$true; nativeImageSend=$false; nativeStickerSend=$false;
+    targetVersion='4.1.15.13'; profile='4.1.15.13-media-mentions-v2'; integration='WeChatAgent-1';
+    nativeTextSend=$true; nativeImageSend=$true; nativeMentionSend=$true; nativeQuoteSend=$false; nativeStickerSend=$false;
     sha256=(Get-FileHash -LiteralPath (Join-Path $output 'wechatagent-text-4.1.15.13.dll') -Algorithm SHA256).Hash.ToLowerInvariant();
     loaderSha256=(Get-FileHash -LiteralPath (Join-Path $output 'wechatagent-text-loader.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'build.json') -Encoding UTF8
-Write-Output 'Built 4.1.15.13 native text components; no WeChat process was changed.'
+Write-Output 'Built 4.1.15.13 native text/image/mention components; no WeChat process was changed.'
