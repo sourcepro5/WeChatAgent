@@ -57,6 +57,10 @@ export function taskFailureMessage(output, code) {
   if (/SERVICE_START_TIMEOUT/.test(output)) return portLabel+'对应的本实例服务未在期限内准备完成。请查看该服务日志，或重启本实例后重试。';
   if (/READER_PORT_UNAVAILABLE/.test(output)) return '读取服务端口已被占用或被 Windows 拒绝。请在连接设置中修改微信读取端口，再启动服务；端口可能被未监听的其他程序占用。';
   if (/port is used by another installation|port is already in use|EADDRINUSE|address already in use/i.test(output)) return '配置端口已被占用。点击“检查占用进程”，核对程序后可选择停止，再重试。';
+  if (/WECHAT_OTHER_CLIENT_RUNNING/.test(output)) return '检测到其他版本的微信正在运行。请先从微信托盘正常退出，再点击“打开微信”启动连接设置中的匹配版本。';
+  if (/WECHAT_STARTUP_TIMEOUT/.test(output)) return '已尝试打开匹配微信，但它尚未完成启动。请查看微信窗口是否提示升级或启动失败；确认后再重试。';
+  if (/WECHAT_LAUNCH_FAILED/.test(output)) return 'Windows 未能打开所选微信程序。请检查连接设置中的程序路径，并查看下方具体启动错误。';
+  if (/HOOK_PROFILE_MISMATCH/.test(output)) return '微信版本或已加载的发送组件不匹配。请正常退出该微信后重新打开，并确认使用对应版本的组件。';
   if (/Another desktop WeChat is running|WECHAT_MULTIPLE/i.test(output)) return '检测到其他微信客户端。点击“检查占用进程”，确认并停止对应微信后，再打开匹配微信。';
   if (/HOOK_CLIENT_UNHEALTHY|HOOK_INITIALIZATION_TIMEOUT|HOOK_NOT_LISTENING/.test(output)) return '微信发送组件尚未就绪。可稍后重试；持续失败时点击“修复微信连接”，核对进程并再次确认后重开匹配微信。详情见 hook-init.log。';
   if (/HOOK_AUTH_FAILED|HOOK_PORT_OWNER_MISMATCH/.test(output)) return '微信发送端口或令牌与当前客户端不一致。请检查占用进程和 hook-init.log；可通过“修复微信连接”重新打开匹配微信。';

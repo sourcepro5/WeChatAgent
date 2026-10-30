@@ -1,3 +1,37 @@
+function Open-HookClient([string]$Executable,[string]$BaseUrl,[ValidateRange(0,120)][int]$TimeoutSeconds=35) {
+    $Executable=[IO.Path]::GetFullPath($Executable)
+    $uri=[Uri]$BaseUrl
+    if($uri.Scheme -ne 'http' -or $uri.Host -ne '127.0.0.1' -or $uri.UserInfo -or $uri.AbsolutePath -ne '/' -or $uri.Query -or $uri.Fragment -or $uri.Port -lt 1024 -or $uri.Port -gt 65535){throw 'HOOK_LOOPBACK_REQUIRED'}
+    $clients=@(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object {$_.CommandLine -notmatch '--type=|--crashpad-handler'})
+    $matching=@($clients | Where-Object {$_.ExecutablePath -eq $Executable})
+    if($matching.Count -gt 1){throw 'WECHAT_MULTIPLE_MATCHING_CLIENTS'}
+    if(@($clients | Where-Object {$_.ExecutablePath -ne $Executable}).Count){throw 'WECHAT_OTHER_CLIENT_RUNNING: Exit the other WeChat normally before opening the configured client.'}
+    if(-not $matching.Count){
+        if(@(Get-NetTCPConnection -LocalPort $uri.Port -State Listen -ErrorAction SilentlyContinue).Count){throw 'HOOK_PORT_OWNER_MISMATCH'}
+        Write-Output 'Starting the configured WeChat client...'
+        try{Start-Process -FilePath $Executable -WorkingDirectory (Split-Path -Parent $Executable) -WindowStyle Normal -PassThru -ErrorAction Stop | Out-Null}
+        catch{throw 'WECHAT_LAUNCH_FAILED: '+$_.Exception.Message}
+    }
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    do {
+        $clients=@(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object {$_.CommandLine -notmatch '--type=|--crashpad-handler'})
+        if(@($clients | Where-Object {$_.ExecutablePath -ne $Executable}).Count){throw 'WECHAT_OTHER_CLIENT_RUNNING'}
+        $matching=@($clients | Where-Object {$_.ExecutablePath -eq $Executable})
+        if($matching.Count -eq 1){
+            try{
+                $client=Get-Process -Id ([int]$matching[0].ProcessId) -ErrorAction Stop
+                if(-not $client.HasExited -and $client.Path -eq $Executable -and @($client.Modules | Where-Object {$_.ModuleName -eq 'Weixin.dll'}).Count){
+                    Write-Output 'Matching WeChat core is loaded; preparing its sender...'
+                    return
+                }
+            }catch{}
+        }
+        if($watch.Elapsed.TotalSeconds -ge $TimeoutSeconds){break}
+        Start-Sleep -Milliseconds 200
+    }while($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    throw 'WECHAT_STARTUP_TIMEOUT: The configured WeChat did not finish loading its core.'
+}
+
 # Health is independent of reader setup: the client can be healthy before login.
 function Wait-HookClient([string]$Executable,[string]$BaseUrl,[string]$ExpectedVersion,[string]$TokenFile,[int]$TimeoutSeconds=35) {
     $token=(Get-Content -LiteralPath $TokenFile -Raw -Encoding UTF8).Trim()

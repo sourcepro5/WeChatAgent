@@ -11,6 +11,10 @@ if ((Get-Item -LiteralPath $exe).VersionInfo.FileVersion -ne $config.hook.expect
 $signature = Get-AuthenticodeSignature -LiteralPath $exe
 if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Tencent') { throw 'WeChat executable signature check failed.' }
 if ($config.hook.expectedVersion -eq '4.1.15.13') {
+    if (-not $PrepareOnly) {
+        . (Join-Path $PSScriptRoot 'hook-client-health.ps1')
+        Open-HookClient $exe $config.hook.baseUrl
+    }
     & (Join-Path $PSScriptRoot 'load-hook-current.ps1') -Executable $exe -BaseUrl $config.hook.baseUrl -PrepareOnly:$PrepareOnly
     exit
 }
