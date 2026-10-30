@@ -6,7 +6,7 @@ const reserved=new Set(['skill','wechat_web_search','wechat_file_receive','wecha
 const controlTool=/^(?:bash|shell|pwsh|powershell|terminal|exec_command|apply_patch|read|write|edit|glob|grep|job|file|read_file|write_file|edit_file|agent|task|config|plugin|session|schedule|automation)(?:$|[_.:-])/i;
 export const assignableTool=(name,mode='social')=>typeof name==='string'&&!reserved.has(name)&&(mode==='assistant'||!controlTool.test(name))&&/^[\w.:-]{1,120}$/.test(name);
 const esc=text=>String(text??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
-const readPolicy=(root,key)=>{try{const file=path.join(root,'config/wechatagent.json'),stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1048576)return {skills:[],tools:[]};const w=JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'' )).wechat;return {...conversationAccess(w,key),workMode:conversationWorkMode(w,key)};}catch{return {skills:[],tools:[]};}};
+const readPolicy=(root,key)=>{try{const file=path.join(root,'config/wechatagent.json'),stat=fs.lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1048576)return {skills:[],tools:[]};const w=JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'' )).wechat;return {...conversationAccess(w,key),workMode:conversationWorkMode(w,key),socialToolLimit:w?.socialToolLimit?.[key]};}catch{return {skills:[],tools:[]};}};
 export {readPolicy as readDshAccess};
 export async function dshCatalog(ctx,{scope,cwd,signal,workMode='social',includePlugins=true}={}){
   const skillsService=scope?.ctx?.get?.('skills')??ctx.get?.('skills'),toolsService=ctx.get?.('tools')??ctx.tools;
@@ -35,7 +35,10 @@ export function bindDshAccess(agentCtx,ctx,agent,root,key,turnFor,{isAllowed=()=
     signal.throwIfAborted();if(!active()||!canSkill(args.name))throw Error('DSH_SKILL_NOT_ALLOWED');
     return {content:JSON.stringify({source:'wechatagent_dsh_skill',name:skill.name,content:content.slice(0,12000),resourceHint:skill.resourceBase?.kind==='directory'?'可按需加载该技能 references/ 中的文字资料。':undefined,notice:'仅为当前聊天授权技能说明；执行工具仍须单独授权，保持 WeChatAgent 当前人设。'}),isError:false};
   }};
-  const policy={names:()=>new Set([...definitions().map(tool=>tool.name),...(native()||access().skills.length?['skill']:[])]),check:name=>{if(!policy.names().has(name))return false;if(name!=='skill'&&++turnFor().toolCalls>(boundMode==='assistant'?access().toolLimit??200:3))return false;return true;},definitions:()=>[...definitions(),...(native()||access().skills.length?[loader]:[])]};
+  // 聊天模式原本把每轮工具调用写死成 3 次（与表情包、联网搜索、记忆等共用）。
+  // 开放成可配：wechat.dshAccess.chats[<会话>].socialToolLimit，缺省仍是 3。
+  const socialToolLimit=()=>{const value=access().socialToolLimit;return Number.isInteger(value)&&value>=1&&value<=20?value:3;};
+  const policy={names:()=>new Set([...definitions().map(tool=>tool.name),...(native()||access().skills.length?['skill']:[])]),check:name=>{if(!policy.names().has(name))return false;if(name!=='skill'&&++turnFor().toolCalls>(boundMode==='assistant'?access().toolLimit??200:socialToolLimit()))return false;return true;},definitions:()=>[...definitions(),...(native()||access().skills.length?[loader]:[])]};
   Object.defineProperty(agentCtx,DSH_ACCESS_POLICY,{value:policy,configurable:true});
   const dispose=agentCtx.tools.register(loader);
   return {async instructions(){if(!active()||!native()&&!access().skills.length)return '';const catalog=await dshCatalog(ctx,{includePlugins:false,workMode:boundMode,scope:agent,cwd:agent.session.header?.cwd,signal:turnFor().controller.signal}),selected=new Set(access().skills);return '[DSH 技能]\n技能和插件由 DSH 管理；人设只决定表达风格。需要时调用 skill 加载说明，实际执行仍遵守 DSH 原生权限与审批。\n'+catalog.skills.filter(item=>native()||selected.has(item.name)).map(item=>esc(item.name)+'：'+esc(item.description)).join('\n').slice(0,12000);},dispose(){dispose?.();delete agentCtx[DSH_ACCESS_POLICY];}};
