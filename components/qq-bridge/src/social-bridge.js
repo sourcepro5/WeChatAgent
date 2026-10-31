@@ -71,6 +71,7 @@ const engine = new SocialEngine({ buffer,connection, roleFor: key => personaFor(
   privateMinIntervalMs: config.social?.private_min_interval_ms ?? 1000,
   maxPerMinute: config.social?.max_per_minute ?? 3,
   maxPerTenMinutes: config.social?.max_per_ten_minutes ?? 10,
+  followUpMs: config.social?.follow_up_ms ?? 0,
   decide: (key, prompt, metadata) => plugin.followup(key, prompt, metadata),
   modelSearchReady:()=>plugin.modelSearchReady(),
   searchFor:searchStateFor,

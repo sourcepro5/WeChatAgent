@@ -73,7 +73,9 @@ export function validateConsoleConfig(config, root) {
   for (const list of [config.account.nicknames, config.wechat.wake_words]) {
     if (!Array.isArray(list) || list.length > 50 || list.some(v => typeof v !== 'string' || !v.trim() || v.length > 100)) throw fault('昵称与唤醒词必须是有效文字，每项不超过 100 字。');
   }
-  const ranges = { batch_ms: [0, 60000], min_interval_ms: [0, 3600000], private_min_interval_ms: [0, 3600000], max_per_minute: [1, 1000], max_per_ten_minutes: [1, 10000] };
+  config.social ??= {};
+  if (config.social.follow_up_ms === undefined) config.social.follow_up_ms = 0;
+  const ranges = { batch_ms: [0, 60000], min_interval_ms: [0, 3600000], private_min_interval_ms: [0, 3600000], max_per_minute: [1, 1000], max_per_ten_minutes: [1, 10000], follow_up_ms: [0, 1800000] };
   for (const [key, [low, high]] of Object.entries(ranges)) {
     if (!Number.isInteger(config.social?.[key]) || config.social[key] < low || config.social[key] > high) throw fault(`回复频率 ${key} 必须在 ${low}–${high} 范围内。`);
   }
