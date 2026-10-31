@@ -73,13 +73,13 @@ function previousReplyContext(previousReply) {
   return `${heading}：\n<previous_reply>${text}</previous_reply>\n`;
 }
 
-export function buildSocialPrompt({ key, rows, role, direct, lastReplyAt, previousReply, now=Date.now() }) {
+export function buildSocialPrompt({ key, rows, role, direct, followUp=false, lastReplyAt, previousReply, now=Date.now() }) {
   const quote = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   const history = rows.map(row=>chatLine(row,true)).join('\n');
   const ago = lastReplyAt ? `${Math.round((now - lastReplyAt) / 60000)} 分钟前` : '还没有发言';
   const chatName = quote(rows.at(-1)?.conversation_name ?? key);
   return '新的群聊消息。沿用当前 DSH session 的稳定人格。\n' + currentTimeNotice(now) +
-    `微信群：${chatName}（${key}）。你上次发言：${ago}。${direct ? rows.some(row=>row.interaction==='pat') ? '本批有拍一拍提醒，结合连带文字判断是否在叫你接话。' : rows.some(row=>normalizeQuoteReply(row.quoteReply)?.reference.senderRelation==='self') ? '本批有人引用本账号的发言，结合新回复和上下文判断如何接话。' : '有人直接@你或使用唤醒词；若安全允许，应直接简短回应。' : '这是一批普通群消息。'}\n` +
+    `微信群：${chatName}（${key}）。你上次发言：${ago}。${followUp ? '刚才叫你的成员接着说，属于同一轮对话的延续；可以直接接话，不必等再次@。' : direct ? rows.some(row=>row.interaction==='pat') ? '本批有拍一拍提醒，结合连带文字判断是否在叫你接话。' : rows.some(row=>normalizeQuoteReply(row.quoteReply)?.reference.senderRelation==='self') ? '本批有人引用本账号的发言，结合新回复和上下文判断如何接话。' : '有人直接@你或使用唤醒词；若安全允许，应直接简短回应。' : '这是一批普通群消息。'}\n` +
     previousReplyContext(previousReply) +
     `<untrusted_chat>\n${history}\n</untrusted_chat>\n` +
     patReaction(rows) + forwardedRecordNotice(rows) + quoteReplyNotice(rows);
@@ -112,12 +112,12 @@ export function replyCooldown(recent, now, { intervalMs, maxPerMinute, maxPerTen
 
 /** Batched social decisions; one in-flight decision per conversation. */
 export class SocialEngine {
-  constructor({ buffer, decide, send, roleFor = () => '', personaNameFor = () => '',workModeFor=()=> 'social', wakeWords = [], mode = 'hybrid',
+  constructor({ buffer, decide, send, roleFor = () => '', personaNameFor = () => '',workModeFor=()=> 'social', wakeWords = [], mode = 'hybrid', followUpMs = 0,
     assistantBatchMs=650,assistantChatOnly=false,maxTextPartsFor=()=>2,notebookEnabledFor=()=>false,batchMs = 3000, minIntervalMs = 15000, privateMinIntervalMs = 1000,
     maxPerMinute = 3, maxPerTenMinutes = 10, stickerChoicesFor = async()=>[], sendSticker,
     stickerPolicyFor=()=>({enabled:true,labelCache:true}),stickerLabelsFor=async()=>[],saveStickerLabels=async()=>{},
     assistantAccess=()=>false,assistantControl,modeFor,searchFor=async()=>null,modelSearchReady=async()=>false,searchPolicyFor=()=>SEARCH_DEFAULTS,stickerSelect=selectStickerChoices,deliveryRetry={},connection=null,log = () => {} }) {
-    Object.assign(this, { buffer, decide, send, roleFor, personaNameFor,workModeFor, wakeWords, mode, batchMs,
+    Object.assign(this, { buffer, decide, send, roleFor, personaNameFor,workModeFor, wakeWords, mode, followUpMs, batchMs,
       minIntervalMs, privateMinIntervalMs, maxPerMinute, maxPerTenMinutes, log });
     if (![maxPerMinute,maxPerTenMinutes].every(value => Number.isSafeInteger(value) && value > 0)) throw new TypeError('Reply quotas must be positive integers');
     this.connection=connection;if(connection)connection.onBoundary=()=>this.suspendConnection();
@@ -125,6 +125,7 @@ export class SocialEngine {
     this.maxTextPartsFor=maxTextPartsFor;this.notebookEnabledFor=notebookEnabledFor;
     this.timers = new Map(); this.running = new Set(); this.dirty = new Set();
     this.pendingDirect = new Set(); this.sentAt = new Map();
+    this.lastDirectSender = new Map();
     this.decisions = new Map();
     this.stickerSelect=stickerSelect;
     this.deliveryRetry={busyDelayMs:500,busyTimeoutMs:30000,maxBusyRetries:6,receiptDelayMs:1500,maxReceiptChecks:2,mediaDeadlineMs:45000,mediaCallTimeoutMs:10000,...deliveryRetry};
@@ -160,7 +161,7 @@ export class SocialEngine {
   }
 
   suspendConnection(){
-    for(const timer of this.timers.values())clearTimeout(timer);this.timers.clear();this.dirty.clear();this.pendingDirect.clear();
+    for(const timer of this.timers.values())clearTimeout(timer);this.timers.clear();this.dirty.clear();this.pendingDirect.clear();this.lastDirectSender.clear();
     for(const [key,item]of new Map([...this.buffer.pendingReplies,...this.decisions])){
       item.offlineCancelled=true;
       for(const part of item.parts??[]){
@@ -182,6 +183,25 @@ export class SocialEngine {
     if(changed){this.buffer.forgetRequest(key);this.buffer.saveMedia();this.log('[Assistant] '+key+' unauthorized_queued_input_discarded');}
   }
   unreadFor(key,limit=300){if(this.workModeFor(key)==='assistant')this.discardDeniedAssistant(key);return this.buffer.unread(key,this.buffer.maxPerChat).filter(row=>(row.work_mode??'social')===this.workModeFor(key)).slice(0,limit);}
+  // A mention opens exactly one dispatch. Keep the caller around for a
+  // short window so their next message in the same thread still gets a
+  // reply without a second @. Window 0 keeps the old behaviour.
+  rememberDirectSender(key,source){
+    const sender=source?.sender_wxid??source?.sender_id;
+    if(sender==null||sender==='')return;
+    this.lastDirectSender.set(key,{sender:String(sender),at:Date.now()});
+  }
+  refreshDirectSender(key){const record=this.lastDirectSender.get(key);if(record)record.at=Date.now();}
+  followUpAllowed(key,rows=null){
+    const raw=typeof this.followUpMs==='function'?this.followUpMs():this.followUpMs;
+    const windowMs=Number(raw)|0;
+    if(!windowMs)return false;
+    const record=this.lastDirectSender.get(key);
+    if(!record)return false;
+    if(Date.now()-record.at>windowMs){this.lastDirectSender.delete(key);return false;}
+    const source=rows??this.unreadFor(key,300);
+    return source.some(row=>!row.outgoing&&String(row.sender_wxid??row.sender_id??'')===record.sender);
+  }
 
   receive(message) {
     if(this.stopped)return;
@@ -213,8 +233,9 @@ export class SocialEngine {
       }).catch(error=>{this.log('[Assistant] '+key+' control_failed code='+(error.code??'unavailable'));if(!this.stopped&&(!this.connection||this.connection.current(controlEpoch))&&this.assistantAllowed(key,message))void this.send(message,'助手控制暂未完成：'+({ASSISTANT_ADMIN_REQUIRED:'此操作仅允许指定管理员。',ASSISTANT_TASK_NOT_ALLOWED:'只能操作自己发起的任务。',ASSISTANT_APPROVAL_EXPIRED:'审批已过期或已处理，请重新查看任务状态。',SESSION_GROUP_SESSION_BUSY:'当前仍有任务，请完成或取消后再切换工作区。'}[error.code]??'请查看任务状态，确认 DSH 已连接后重试。'),{deliveryId}).catch(()=>{});});return;
     }
     this.buffer.append({ ...message,work_mode:this.workModeFor(key),assistant_chat_only:this.assistantChatOnly,direct_mention: direct });
+    if (direct) this.rememberDirectSender(key, message);
     if(message.interaction==='pat' && !this.patWaitUntil.has(key))this.patWaitUntil.set(key,Date.now()+this.batchMs);
-    if (message.kind === 'group' && this.modeFor(key) === 'mention' && !direct) return;
+    if (message.kind === 'group' && this.modeFor(key) === 'mention' && !direct && !this.followUpAllowed(key)) return;
     this.dirty.add(key);
     if (direct && this.running.has(key)) { this.pendingDirect.add(key); return; }
     if(direct&&this.workModeFor(key)==='assistant'){
@@ -232,7 +253,7 @@ export class SocialEngine {
     if (this.stopped || this.running.has(key) || this.timers.has(key) || !this.decisions.has(key)&&!this.unreadFor(key, 1).length) return;
     const latest = this.decisions.get(key)?.message??this.buffer.recent(key, 1)[0];
     if (!latest || !['group', 'private'].includes(latest.kind)) return;
-    if (latest.kind === 'group' && this.modeFor(key) === 'mention' && !this.decisions.get(key)?.sending && !this.unreadFor(key,300).some(row => row.direct_mention || isDirectMention(row, this.wakeWords))) return;
+    if (latest.kind === 'group' && this.modeFor(key) === 'mention' && !this.decisions.get(key)?.sending && !this.unreadFor(key,300).some(row => row.direct_mention || isDirectMention(row, this.wakeWords)) && !this.followUpAllowed(key)) return;
     this.timers.set(key, setTimeout(() => {
       this.timers.delete(key); void this.#run(key, latest, false);
     }, this.batchMs));
@@ -251,7 +272,7 @@ export class SocialEngine {
       };
       const queued=this.decisions.get(key);
       if(queued?.sending&&queued.parts?.length){completed=await this.#deliverReply(key,queued);return;}
-      if(message.kind==='group'&&this.modeFor(key)==='mention'&&!this.decisions.get(key)?.sending&&!this.unreadFor(key,300).some(row=>row.direct_mention||isDirectMention(row,this.wakeWords)))return;
+      if(message.kind==='group'&&this.modeFor(key)==='mention'&&!this.decisions.get(key)?.sending&&!this.unreadFor(key,300).some(row=>row.direct_mention||isDirectMention(row,this.wakeWords))&&!this.followUpAllowed(key))return;
       const wakeMode=this.modeFor(key);
       let savedRequest=this.buffer.pendingRequests.get(key);
       const workMode=this.workModeFor(key);
@@ -281,6 +302,9 @@ export class SocialEngine {
         this.patWaitUntil.delete(key);
       }
       direct ||= rows.some(row => row.direct_mention || isDirectMention(row, this.wakeWords));
+      const followUp = !direct && this.followUpAllowed(key, unread);
+      if (direct) { const caller = rows.find(row => row.direct_mention || isDirectMention(row, this.wakeWords)); if (caller) this.rememberDirectSender(key, caller); }
+      else if (followUp) this.refreshDirectSender(key);
       const chatRows = rows.filter(row => !isBehaviorChangeCommand(row.text));
       if (chatRows.length !== rows.length) this.log(`[Social] ${key} behavior_change_blocked rows=${rows.length-chatRows.length}`);
       const policy=await this.stickerPolicyFor(message),policyKey=stickerPolicyKey(policy);
@@ -318,7 +342,7 @@ export class SocialEngine {
       const previousReply = this.buffer.recent(key,this.buffer.maxPerChat).findLast(row => row.outgoing&&(row.work_mode??'social')===workMode);
       let prompt = workMode==='assistant'&&!this.assistantChatOnly?buildAssistantPrompt({key,rows:labelledRows,previousReply}):message.kind === 'private'
         ? buildPrivatePrompt({ key, rows:labelledRows, role, previousReply })
-        : buildSocialPrompt({ key, rows:labelledRows, role, direct, lastReplyAt: this.lastReplyAt.get(key), previousReply });
+        : buildSocialPrompt({ key, rows:labelledRows, role, direct, followUp, lastReplyAt: this.lastReplyAt.get(key), previousReply });
       const contextNotice=this.buffer.contextNotices.get(key);
       if(contextNotice)prompt+='\n本机发送状态说明（不改变人格）：'+quote(contextNotice.text);
       let stickerChoices=[];
