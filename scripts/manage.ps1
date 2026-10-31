@@ -80,7 +80,17 @@ function Get-PortBindings([int]$Port) {
     }
     # These services bind IPv4 loopback. A separate IPv6-only listener may
     # legitimately share the number; the IPv4 bind probe remains final.
-    return @($connections | Where-Object { [string]$_.State -in @('Listen','Bound') -and $_.LocalAddress -in @('127.0.0.1','0.0.0.0') })
+    # Some Windows builds report a live IPv4 listener with an empty State and
+    # RemotePort 0 while established sockets keep their state. Accept that
+    # shape so the owning process can still be verified; Test-ServiceReady
+    # proves the listener with a real loopback handshake before reporting
+    # readiness.
+    return @($connections | Where-Object {
+        $_.LocalAddress -in @('127.0.0.1','0.0.0.0') -and (
+            [string]$_.State -in @('Listen','Bound') -or
+            ([string]::IsNullOrEmpty([string]$_.State) -and [int]$_.RemotePort -eq 0)
+        )
+    })
 }
 function Assert-PortBindable([string]$Name,[int]$Port) {
     $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$Port)
@@ -93,7 +103,11 @@ function Assert-PortBindable([string]$Name,[int]$Port) {
     } finally { $listener.Stop() }
 }
 function Test-ServiceReady([string]$Name,[int]$Port,[int]$ExpectedProcessId) {
-    $listeners=@(Get-PortBindings $Port | Where-Object { [string]$_.State -eq 'Listen' })
+    # A loopback handshake is the authoritative "listening" proof: some Windows
+    # builds report listener rows with an empty State, and the port table is
+    # only used to verify which process owns the port.
+    if(-not(Test-Port $Port)){return $false}
+    $listeners=@(Get-PortBindings $Port)
     if(-not $listeners.Count){return $false}
     $owners=@($listeners | Select-Object -ExpandProperty OwningProcess -Unique)
     if(@($owners | Where-Object {[int]$_ -ne $ExpectedProcessId}).Count){throw ('SERVICE_PORT_OWNER_MISMATCH service='+$Name+' port='+$Port+' expectedPid='+$ExpectedProcessId+' owners='+($owners -join ','))}

@@ -42,8 +42,13 @@ try {
 } finally { & (Join-Path $PSScriptRoot 'pin-hook-client.ps1') }
 if ($PrepareOnly) { Write-Output 'Matching client prepared with verified Hook DLL and local token; not launched.'; exit 0 }
 if ($existing.Count) { throw 'Another desktop WeChat is running. Exit it from the tray before opening the isolated Hook client; this script does not terminate it.' }
+function Test-HookPortOpen([int]$Port) {
+    $client = [Net.Sockets.TcpClient]::new()
+    try { $task = $client.ConnectAsync('127.0.0.1',$Port); return ($task.Wait(700) -and $client.Connected) }
+    catch { return $false } finally { $client.Dispose() }
+}
 $port = ([Uri]$config.hook.baseUrl).Port
-if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw 'Hook port is already in use; inspect the listener before launching.' }
+if (Test-HookPortOpen $port) { throw 'Hook port is already in use; inspect the listener before launching.' }
 $clientProcess = Start-Process -FilePath $exe -ArgumentList ('StartPort='+$port+' CallBackURL="http://127.0.0.1:'+ $config.ports.adapter + '/unused"') -WorkingDirectory $directory -WindowStyle Normal -PassThru
 Write-Output 'Waiting for matching WeChat launcher handoff and sender initialization...'
 Wait-HookClient $exe $config.hook.baseUrl $config.hook.expectedVersion (Join-Path $root 'state\hook\native-token.txt')
