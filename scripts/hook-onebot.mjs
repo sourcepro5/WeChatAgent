@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PAT_TYPE, FORWARD_TYPE, QUOTE_TYPE, normalizeForwardedRecord, normalizeQuoteReply } from '../components/qq-bridge/src/core/wechat-events.js';
+import { PAT_TYPE, FORWARD_TYPE, QUOTE_TYPE, CARD_TYPE, CARD_TYPES, normalizeForwardedRecord, normalizeQuoteReply, normalizeSharedCard, sharedCardText } from '../components/qq-bridge/src/core/wechat-events.js';
 import { stickerPolicy, cleanStickerLabel } from '../components/qq-bridge/src/core/sticker-policy.js';
 import {FileDeliveryWorker} from './file-delivery-worker.mjs';
 import { TextDeliveryStore } from './text-delivery-store.mjs';
@@ -401,10 +401,12 @@ export class HookOneBot {
   }
   incoming(payload) {
     this.reload();
-    if (payload?.event !== 'message.new' || ![1,3,34,47,PAT_TYPE,49,FORWARD_TYPE,QUOTE_TYPE,25769803825].includes(payload.type) || typeof payload.content !== 'string' || !payload.content.trim() || !payload.sessionId || !payload.talkerId || payload.isSend || payload.talkerId === this.ownWxid) return null;
+    if (payload?.event !== 'message.new' || ![1,3,34,47,PAT_TYPE,49,FORWARD_TYPE,QUOTE_TYPE,25769803825,...CARD_TYPES].includes(payload.type) || typeof payload.content !== 'string' || !payload.content.trim() || !payload.sessionId || !payload.talkerId || payload.isSend || payload.talkerId === this.ownWxid) return null;
+
     const forwardedRecord=[49,FORWARD_TYPE].includes(payload.type)?normalizeForwardedRecord(payload.forwardedRecord):null;
     const quoteReply=[49,QUOTE_TYPE].includes(payload.type)?normalizeQuoteReply(payload.quoteReply):null;
-    if([49,FORWARD_TYPE,QUOTE_TYPE].includes(payload.type) && (!forwardedRecord && !quoteReply || forwardedRecord && quoteReply))return null;
+    const sharedCard=payload.type===CARD_TYPE||CARD_TYPES.includes(payload.type)?normalizeSharedCard(payload.sharedCard):null;
+    if([49,FORWARD_TYPE,QUOTE_TYPE,...CARD_TYPES].includes(payload.type) && (!forwardedRecord && !quoteReply && !sharedCard || forwardedRecord && quoteReply))return null;
     if ([3,47].includes(payload.type) && !/^[a-f0-9]{64}$/.test(payload.image?.id ?? '')) return null;
     if(payload.type===34&&(!/^[a-f0-9]{64}$/.test(payload.voice?.id??'')||!Number.isFinite(payload.voice.durationSeconds)||payload.voice.durationSeconds<=0||payload.voice.durationSeconds>60))return null;
     if(payload.type===25769803825&&(!/^[a-f0-9]{64}$/.test(payload.file?.id??'')||typeof payload.file?.name!=='string'||!Number.isSafeInteger(payload.file?.size)||payload.file.size<0||payload.file.size>50*1024*1024))return null;
@@ -430,7 +432,7 @@ export class HookOneBot {
       message_type: kind, sub_type: group ? 'normal' : 'friend', message_id: payload.rawid,
       user_id: userId, message: segments, raw_message: content,
       sender: { user_id: userId, nickname: payload.sourceName || payload.senderName || String(userId) },
-      ...({wechatagent:{senderWxid:payload.talkerId,...(group?{memberId:crypto.createHash('sha256').update('wechat-member:'+payload.talkerId).digest('hex')}:{}),...(payload.type===PAT_TYPE?{interaction:'pat'}:forwardedRecord?{forwardedRecord}:quoteReply?{quoteReply}:{})}}),
+      ...({wechatagent:{senderWxid:payload.talkerId,...(group?{memberId:crypto.createHash('sha256').update('wechat-member:'+payload.talkerId).digest('hex')}:{}),...(payload.type===PAT_TYPE?{interaction:'pat'}:forwardedRecord?{forwardedRecord}:quoteReply?{quoteReply}:sharedCard?{sharedCard}:{})}}),
       ...(group ? { group_id: target, group_name: payload.groupName || String(target) } : {}) };
   }
   enqueue(payload) {

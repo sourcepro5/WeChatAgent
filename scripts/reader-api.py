@@ -31,6 +31,7 @@ from wechat_voice_input import VoiceCatalog, voice_info, load_voice_blob, audio_
 from wechat_media import clean_account_wxid, image_cache_current
 from wechat_forwarded import FORWARD_TYPE, parse_forwarded_record
 from wechat_quote import QUOTE_TYPE, parse_quote_reply
+from wechat_card import parse_shared_card, shared_card_text, CARD_TYPES
 from wechat_sticker_send import sticker_send_fields, sticker_receipt_md5, APPMSG_STICKER_TYPE, native_gif_bytes, stage_sticker_resource
 from wechat_sticker import emoji_attributes, resolve_sticker_bytes, sticker_image_xml, NoRedirect
 from wechat_sticker_labels import StickerLabels, clean_label
@@ -130,7 +131,8 @@ def push_payload(talker, message, names, own_wxid, identity=None):
     if message.get('isSend'):
         return None
     kind = message.get('localType')
-    if kind not in (1, 3, 34, 47, APPMSG_STICKER_TYPE, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE, FILE_TYPE):
+    if kind not in (1, 3, 34, 47, APPMSG_STICKER_TYPE, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE, FILE_TYPE) and kind not in CARD_TYPES:
+
         return None
     pat = parse_pat(message.get('fullText', ''), sender, own_wxid) if kind == PAT_TYPE else None
     if kind == PAT_TYPE and not pat:
@@ -146,9 +148,11 @@ def push_payload(talker, message, names, own_wxid, identity=None):
     if kind == 34 and not voice:
         return None
     sticker = kind==47 or kind in (49,APPMSG_STICKER_TYPE) and sticker_image_xml(kind,message.get('fullText','')) is not None
-    if kind in (49, APPMSG_STICKER_TYPE, FORWARD_TYPE, QUOTE_TYPE) and not sticker and file_info is None and forwarded is None and quote_reply is None:
+    shared_card = parse_shared_card(message.get('fullText', ''), kind) if kind == 49 or kind in CARD_TYPES else None
+    if (kind in (49, APPMSG_STICKER_TYPE, FORWARD_TYPE, QUOTE_TYPE) or kind in CARD_TYPES) and not sticker and file_info is None and forwarded is None and quote_reply is None and shared_card is None:
         return None
-    content = '[语音，尚未转写]' if voice else '[文件] ' + file_info['name'] if file_info else '[图片]' if kind == 3 else '[表情包：附件为静态画面或动画采样画面]' if sticker else '[拍一拍] 对方刚刚拍了拍你。' if pat else '[合并转发聊天记录] ' + forwarded['title'] if forwarded else (quote_reply['reply'] or '[引用回复，正文为空]') if quote_reply else message.get('fullText', message.get('content') or message.get('parsedContent', ''))
+    content = '[语音，尚未转写]' if voice else '[文件] ' + file_info['name'] if file_info else '[图片]' if kind == 3 else '[表情包：附件为静态画面或动画采样画面]' if sticker else '[拍一拍] 对方刚刚拍了拍你。' if pat else '[合并转发聊天记录] ' + forwarded['title'] if forwarded else (quote_reply['reply'] or '[引用回复，正文为空]') if quote_reply else shared_card_text(shared_card) if shared_card else message.get('fullText', message.get('content') or message.get('parsedContent', ''))
+
     if not content.strip():
         return None
     group = '@chatroom' in talker
@@ -166,6 +170,7 @@ def push_payload(talker, message, names, own_wxid, identity=None):
         **({'pat': pat} if pat else {}),
         **({'forwardedRecord': forwarded} if forwarded else {}),
         **({'quoteReply': quote_reply} if quote_reply else {}),
+        **({'sharedCard': shared_card} if shared_card else {}),
         **({'image': {'localId': message.get('localId'), 'serverId': message.get('serverId'),
             'createTime': message.get('createTime'), 'localType': 47 if sticker else kind,
             **({'dbLocalType':kind} if sticker and kind!=47 else {})}} if kind==3 or sticker else {})}
@@ -380,7 +385,8 @@ class Reader:
             # Preserve complete text: the upstream CLI display truncates to 200.
             table = 'Msg_' + hashlib.md5(talker.encode()).hexdigest()
             for message in data.get('messages', []):
-                if message.get('localType') not in (1, 34, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE, 47, APPMSG_STICKER_TYPE, FILE_TYPE):
+                if message.get('localType') not in (1, 34, PAT_TYPE, 49, FORWARD_TYPE, QUOTE_TYPE, 47, APPMSG_STICKER_TYPE, FILE_TYPE) and message.get('localType') not in CARD_TYPES:
+
                     continue
                 for connection in connections:
                     if table not in nt.msg_tables(connection):
@@ -889,7 +895,7 @@ class Reader:
         return True
 
     def replay_event(self, descriptor):
-        """Explicit diagnostic retry of one exact inbound media/pat message."""
+        """Explicit diagnostic retry of one exact inbound media/pat/card message."""
         target = str(descriptor.get('conversationId', ''))
         talkers = [talker for talker in self.selected_talkers()
             if self.conversation_id(talker) == target and self.image_talker_allowed(talker)]
@@ -902,7 +908,7 @@ class Reader:
             and message['createTime'] == int(descriptor['createTime'])
             and str(message['serverId']) == str(descriptor['serverId'])), None)
         payload = push_payload(talker, row or {}, self.names, self.own_wxid)
-        if not payload or payload['type'] not in (3, 47, PAT_TYPE):
+        if not payload or (payload['type'] not in (3, 47, PAT_TYPE) and payload['type'] not in CARD_TYPES):
             raise RuntimeError('IMAGE_EVENT_IDENTITY_NOT_FOUND')
         if payload['type'] in (3, 47):
             image_id = self.register_image(talker, payload)
