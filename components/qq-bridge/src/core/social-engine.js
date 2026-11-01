@@ -75,11 +75,21 @@ function previousReplyContext(previousReply) {
 
 export function buildSocialPrompt({ key, rows, role, direct, lastReplyAt, previousReply, now=Date.now() }) {
   const quote = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-  const history = rows.map(row=>chatLine(row,true)).join('\n');
+  // In a mention-mode group only the message that carried the wake-up is addressed to us.
+  // Everything else piled up in the same batch is background: the model must answer that
+  // one message and must not treat the backlog as a list of things to reply to.
+  const directed = rows.filter(row => row.direct_mention);
+  const wakeOnly = key.includes(':group:') && directed.length > 0 && directed.length < rows.length;
+  const target = wakeOnly ? directed.at(-1) : null;
+  const history = rows.map(row => (target && row === target ? '★ ' : '') + chatLine(row,true)).join('\n');
   const ago = lastReplyAt ? `${Math.round((now - lastReplyAt) / 60000)} 分钟前` : '还没有发言';
   const chatName = quote(rows.at(-1)?.conversation_name ?? key);
+  const wakeNotice = wakeOnly
+    ? `本批共 ${rows.length} 条群消息，其中**只有标了 ★ 的那一条是冲你来的**（@你、唤醒词或引用你）；其余是群里同时在聊的别的话题和积压的旧消息，**只当背景，不要为它们发言，也不要逐条回应**。请只针对 ★ 那条回复。\n`
+    : '';
   return '新的群聊消息。沿用当前 DSH session 的稳定人格。\n' + currentTimeNotice(now) +
     `微信群：${chatName}（${key}）。你上次发言：${ago}。${direct ? rows.some(row=>row.interaction==='pat') ? '本批有拍一拍提醒，结合连带文字判断是否在叫你接话。' : rows.some(row=>normalizeQuoteReply(row.quoteReply)?.reference.senderRelation==='self') ? '本批有人引用本账号的发言，结合新回复和上下文判断如何接话。' : '有人直接@你或使用唤醒词；若安全允许，应直接简短回应。' : '这是一批普通群消息。'}\n` +
+    wakeNotice +
     previousReplyContext(previousReply) +
     `<untrusted_chat>\n${history}\n</untrusted_chat>\n` +
     patReaction(rows) + forwardedRecordNotice(rows) + quoteReplyNotice(rows);
