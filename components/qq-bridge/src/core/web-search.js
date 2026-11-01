@@ -3,11 +3,12 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import net from 'node:net';
 import {searchPolicy,searchPolicyKey,searchQueries,searchCharCount} from '../../../../packages/dsh-social-bridge-plugin/search-policy.mjs';
+import {escapePromptText} from '../../../../packages/dsh-social-bridge-plugin/prompt-escape.mjs';
 import {weatherCity,weatherRequest,requestedWeatherDates,WEATHER_STATUS} from '../../../../packages/dsh-social-bridge-plugin/weather-query.mjs';
 import {fetchWeather} from '../../../../packages/dsh-social-bridge-plugin/weather-source.mjs';
 
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
-const escape=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+const escape=escapePromptText;
 const decode=value=>String(value).replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,'$1').replace(/<[^>]*>/g,' ').replace(/&(?:amp|lt|gt|quot|apos);|&#(?:x[0-9a-f]+|\d+);/gi,entity=>{
   const named={'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'"};if(named[entity])return named[entity];
   const code=parseInt(entity.slice(2,-1).replace(/^x/i,''),/^&#x/i.test(entity)?16:10);return code>0&&code<=0x10ffff?String.fromCodePoint(code):'';

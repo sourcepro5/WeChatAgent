@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import {conversationWorkMode} from '../../../../packages/dsh-social-bridge-plugin/conversation-policy.mjs';
+import {escapePromptText} from '../../../../packages/dsh-social-bridge-plugin/prompt-escape.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {buildConversationKey,parseConversationKey} from './conversation-key.js';
@@ -7,7 +8,7 @@ import {SOCIAL_OUTPUT_NOTICE,resolveSocialDecision,hasStickerControl,hasReasonin
 import {proactivePolicy,proactivePolicyKey,withinProactiveWindow,nextProactiveAt,conversationSnapshot,declinedProactive} from './proactive-policy.js';
 
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
-const quote=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+const quote=escapePromptText;
 const localTime=now=>new Date(now+8*3600000).toISOString().slice(0,16).replace('T',' ');
 function historyTime(at,now){
   if(!Number.isFinite(at)||at<=0||at>now||at>8.64e15)return '时间未知，不能当作当前状态';
