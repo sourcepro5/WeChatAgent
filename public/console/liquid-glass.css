@@ -1,0 +1,344 @@
+/* ==========================================================================
+   WeChatAgent · Liquid Glass layer
+   液态玻璃外观层：只改变布局骨架、材质、光影与动效，不改变业务结构。
+   - 漂浮在内容之上的导航与控件（侧边栏、顶栏、弹窗、提示、保存栏、菜单）使用玻璃材质；
+   - Chromium 下由 liquid-glass.js 生成位移贴图，为玻璃边缘加入真实折射；
+   - 系统开启"减少透明度"或浏览器不支持 backdrop-filter 时自动回退为实色。
+
+   目录
+     1. 设计令牌（布局尺寸 / 材质，浅色与深色）
+     2. 布局骨架（侧边栏、工作区、顶栏、保存栏；所有断点只改令牌）
+     3. 背景
+     4. 玻璃材质（共用）
+     5. 组件
+     6. 回退
+   ========================================================================== */
+
+/* ==========================================================================
+   1. 设计令牌
+   ========================================================================== */
+:root{
+  /* 布局：骨架中的所有位置都由这几个值推导 */
+  --lg-gap:12px;                                     /* 悬浮面板与窗口边缘、面板之间的间距 */
+  --lg-side:196px;                                   /* 侧边栏宽度 */
+  --lg-content-left:calc(var(--lg-side) + var(--lg-gap)); /* 工作区左边界（侧边栏右侧） */
+  --lg-content-pad:30px;                             /* 与 console.css 中 main 的左右内边距保持一致 */
+  --lg-topbar-h:58px;
+  --lg-radius:22px;
+
+  /* 材质 */
+  --lg-bg:#ecf2ee;
+  --lg-tint:rgb(255 255 255/.5);
+  --lg-tint-strong:rgb(255 255 255/.72);
+  --lg-solid:rgb(255 255 255/.94);
+  --lg-card:rgb(255 255 255/.64);
+  --lg-fill:rgb(255 255 255/.5);
+  --lg-fill-hover:rgb(255 255 255/.78);
+  --lg-line:rgb(255 255 255/.72);
+  --lg-line-soft:rgb(255 255 255/.45);
+  --lg-hair:rgb(34 64 50/.09);
+  --lg-glare:rgb(255 255 255/.6);
+  --lg-sheen:rgb(255 255 255/.26);
+  --lg-rim-hi:rgb(255 255 255/.95);
+  --lg-rim-lo:rgb(255 255 255/.08);
+  --lg-blur:16px;
+  --lg-sat:190%;
+  --lg-inner:inset 0 1px 0 0 rgb(255 255 255/.9),inset 0 -1px 0 0 rgb(255 255 255/.3),inset 0 0 22px -8px rgb(255 255 255/.7);
+  --lg-drop:0 22px 46px -22px rgb(24 56 40/.32),0 6px 14px -8px rgb(24 56 40/.14);
+  --lg-drop-sm:0 10px 24px -16px rgb(24 56 40/.34),0 2px 6px -3px rgb(24 56 40/.1);
+  --lg-drop-xs:0 4px 10px -6px rgb(24 56 40/.28);
+  --lg-well:inset 0 1px 3px rgb(24 56 40/.1),inset 0 0 0 1px rgb(255 255 255/.4);
+}
+:root[data-theme=dark]{
+  --lg-bg:#121815;
+  --lg-tint:rgb(32 41 36/.5);
+  --lg-tint-strong:rgb(34 43 38/.76);
+  --lg-solid:rgb(36 45 39/.95);
+  --lg-card:rgb(38 48 42/.58);
+  --lg-fill:rgb(255 255 255/.06);
+  --lg-fill-hover:rgb(255 255 255/.11);
+  --lg-line:rgb(255 255 255/.13);
+  --lg-line-soft:rgb(255 255 255/.08);
+  --lg-hair:rgb(255 255 255/.07);
+  --lg-glare:rgb(255 255 255/.1);
+  --lg-sheen:rgb(255 255 255/.06);
+  --lg-rim-hi:rgb(255 255 255/.32);
+  --lg-rim-lo:rgb(255 255 255/.02);
+  --lg-inner:inset 0 1px 0 0 rgb(255 255 255/.14),inset 0 -1px 0 0 rgb(255 255 255/.03),inset 0 0 26px -10px rgb(255 255 255/.14);
+  --lg-drop:0 26px 54px -22px rgb(0 0 0/.7),0 6px 16px -8px rgb(0 0 0/.4);
+  --lg-drop-sm:0 12px 28px -16px rgb(0 0 0/.7),0 2px 6px -3px rgb(0 0 0/.3);
+  --lg-drop-xs:0 4px 12px -6px rgb(0 0 0/.55);
+  --lg-well:inset 0 1px 3px rgb(0 0 0/.35),inset 0 0 0 1px rgb(255 255 255/.04);
+}
+@media(max-width:1100px){
+  :root{--lg-side:176px;--lg-content-pad:24px}
+}
+@media(max-width:640px){
+  /* 侧边栏变为抽屉，覆盖在内容之上，工作区从窗口左边缘开始 */
+  :root{--lg-gap:8px;--lg-side:220px;--lg-content-left:0px;--lg-content-pad:16px;--lg-topbar-h:56px}
+}
+
+/* ==========================================================================
+   2. 布局骨架
+   console.css 的各断点会单独设置这些元素的宽度与偏移；这里统一改为读取令牌，
+   因此每条规则只写一次，断点只需在第 1 节改变令牌。
+   ========================================================================== */
+html{scroll-padding-top:calc(var(--lg-topbar-h) + var(--lg-gap) * 2)}  /* 锚点与聚焦滚动时不被粘性顶栏遮住 */
+body{background:var(--lg-bg)}
+
+/* 侧边栏：四周留出间距的悬浮面板 */
+.sidebar{inset:var(--lg-gap) auto var(--lg-gap) var(--lg-gap);width:var(--lg-side);border-radius:var(--lg-radius);padding:22px 10px 16px}
+
+/* 工作区：用内边距（而非顶栏外边距）留出顶部间距。
+   外边距会穿透 .workspace 向外折叠，使页面总高度比窗口多出一个间距、始终出现滚动条。 */
+.workspace{margin-left:var(--lg-content-left);padding-top:var(--lg-gap)}
+
+/* 顶栏：粘性悬浮条，滚动时内容从玻璃下方经过 */
+.topbar{position:sticky;top:var(--lg-gap);z-index:25;height:var(--lg-topbar-h);margin:0 var(--lg-gap);padding:0 12px 0 20px;border-radius:18px}
+
+/* 保存栏与主内容区左右对齐 */
+.save-bar{left:calc(var(--lg-content-left) + var(--lg-content-pad));right:var(--lg-content-pad);bottom:calc(var(--lg-gap) + 6px)}
+.skip-link{left:calc(var(--lg-content-left) + var(--lg-gap))}
+
+/* 桌面应用：系统窗口按钮固定在窗口右上角且为不透明色块，顶栏贴顶并延伸到右边缘 */
+.desktop-mode .workspace{padding-top:0}
+.desktop-mode .topbar{top:0;height:56px;margin-right:0;border-radius:0 0 0 18px;border-top:0;border-right:0}
+
+@media(max-width:640px){
+  .sidebar{transform:translateX(calc(-100% - var(--lg-gap) * 3));transition:transform .5s var(--ease-spring)}
+  body.nav-open .sidebar{transform:none}
+  .topbar{padding:0 8px;border-radius:16px}
+}
+
+/* ==========================================================================
+   3. 背景：流动极光
+   ========================================================================== */
+::selection{background:color-mix(in srgb,var(--accent) 26%,transparent)}
+.motion-ambient{transform:translate3d(calc(var(--px,0) * -18px),calc(var(--py,0) * -12px),0);transition:transform 1.4s var(--ease-out)}
+.motion-ambient>i{width:62vmax;height:62vmax}
+.motion-ambient>i:nth-child(1){left:-16vmax;top:-24vmax;background:radial-gradient(circle,color-mix(in srgb,var(--accent) 46%,transparent),transparent 62%)}
+.motion-ambient>i:nth-child(2){right:-20vmax;top:6vh;background:radial-gradient(circle,rgb(86 176 152/.4),transparent 60%)}
+.motion-ambient>i:nth-child(3){left:22vw;bottom:-38vmax;background:radial-gradient(circle,rgb(240 178 124/.34),transparent 60%)}
+.motion-ambient>i:nth-child(4){left:30vw;top:-30vmax;width:48vmax;height:48vmax;background:radial-gradient(circle,rgb(140 178 232/.32),transparent 62%);animation-duration:58s;animation-delay:-9s;animation-direction:alternate-reverse}
+.motion-ambient>i:nth-child(5){right:-8vmax;bottom:-26vmax;width:52vmax;height:52vmax;background:radial-gradient(circle,rgb(170 224 190/.44),transparent 62%);animation-duration:70s;animation-delay:-40s;animation-direction:alternate-reverse}
+:root[data-theme=dark] .motion-ambient>i{opacity:1}
+:root[data-theme=dark] .motion-ambient>i:nth-child(1){background:radial-gradient(circle,color-mix(in srgb,var(--accent) 20%,transparent),transparent 62%)}
+:root[data-theme=dark] .motion-ambient>i:nth-child(2){background:radial-gradient(circle,rgb(46 128 112/.26),transparent 60%)}
+:root[data-theme=dark] .motion-ambient>i:nth-child(3){background:radial-gradient(circle,rgb(176 120 70/.14),transparent 60%)}
+:root[data-theme=dark] .motion-ambient>i:nth-child(4){background:radial-gradient(circle,rgb(70 100 160/.16),transparent 62%)}
+:root[data-theme=dark] .motion-ambient>i:nth-child(5){background:radial-gradient(circle,rgb(90 150 110/.16),transparent 62%)}
+.motion-ambient::after{content:'';position:absolute;inset:-20px;opacity:.05;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+:root[data-theme=dark] .motion-ambient::after{opacity:.07}
+
+/* ==========================================================================
+   4. 玻璃材质（共用）
+   --lg-glass-image / --lg-backdrop 声明在元素自身上，才能读取该元素覆盖后的
+   --lg-blur、--lg-glare-size 与 JS 写入的 --gx/--gy、--lg-filter。
+   ========================================================================== */
+.sidebar,.topbar,dialog,.save-bar,.job-panel,.action-menu>div{
+  --lg-glass-image:radial-gradient(var(--lg-glare-size,420px) circle at var(--gx,18%) var(--gy,-40%),var(--lg-glare),transparent 62%),linear-gradient(165deg,var(--lg-sheen),transparent 46%);
+  --lg-backdrop:blur(var(--lg-blur)) var(--lg-filter,) saturate(var(--lg-sat));
+  background-color:var(--lg-tint);
+  background-image:var(--lg-glass-image);
+  -webkit-backdrop-filter:blur(var(--lg-blur)) saturate(var(--lg-sat));
+  backdrop-filter:var(--lg-backdrop);
+  border:1px solid var(--lg-line-soft);
+  box-shadow:var(--lg-drop),var(--lg-inner);
+}
+/* 斜向高光边缘（rim light） */
+.sidebar::before,.topbar::before,.save-bar::before,.job-panel::before,.action-menu>div::before,.toast::before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;pointer-events:none;z-index:4;background:linear-gradient(var(--lg-rim-angle,140deg),var(--lg-rim-hi),var(--lg-rim-lo) 28%,transparent 50%,var(--lg-rim-lo) 72%,var(--lg-rim-hi));-webkit-mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}
+.lg-defs{position:absolute;width:0;height:0;overflow:hidden;pointer-events:none}
+
+/* 自定义背景图：appearance.css 用 background 简写覆盖了以上材质，这里还原 */
+body.has-wallpaper .sidebar,body.has-wallpaper .topbar{background-color:var(--lg-tint);background-image:var(--lg-glass-image);-webkit-backdrop-filter:blur(var(--lg-blur)) saturate(var(--lg-sat));backdrop-filter:var(--lg-backdrop)}
+body.has-wallpaper .card{background-color:var(--lg-card);-webkit-backdrop-filter:blur(20px) saturate(170%);backdrop-filter:blur(20px) saturate(170%)}
+body.has-wallpaper .page-heading{border-color:var(--lg-line-soft);border-radius:18px;background:var(--lg-tint);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);box-shadow:var(--lg-drop-sm),var(--lg-inner)}
+
+/* ==========================================================================
+   5. 组件
+   ========================================================================== */
+
+/* ---------- 侧边栏内容 ---------- */
+.sidebar{--lg-glare-size:340px;--lg-blur:20px}
+.brand{padding:0 8px 22px}
+.brand img{border-radius:10px;box-shadow:0 6px 14px -6px color-mix(in srgb,var(--accent) 55%,transparent),0 0 0 1px var(--lg-line)}
+.nav-caption{padding:12px 12px 8px}
+.sidebar nav a{border-radius:13px;padding:0 12px}
+.sidebar nav a:hover{background:var(--lg-fill)}
+.nav-count{background:var(--lg-fill);box-shadow:inset 0 0 0 1px var(--lg-line-soft);border-radius:999px;padding:2px 7px}
+.sidebar-bottom{padding:18px 12px 0}
+.sidebar-bottom .link-button{display:block;font-size:11px;margin-top:10px;transition:color .2s}
+.sidebar-bottom .link-button:hover{color:var(--accent-text)}
+
+/* 导航选中：液态玻璃滑块（位移与形变由 motion.js 的 jelly() 驱动，这里只负责材质） */
+.motion-nav-indicator{border-radius:13px;transform-origin:50% 50%;
+  background:linear-gradient(180deg,rgb(255 255 255/.82),rgb(255 255 255/.5)),color-mix(in srgb,var(--accent-soft) 70%,transparent);
+  box-shadow:var(--lg-drop-sm),inset 0 1px 0 rgb(255 255 255/.95),inset 0 -1px 1px rgb(255 255 255/.35),inset 0 0 0 1px rgb(255 255 255/.55),0 0 0 1px color-mix(in srgb,var(--accent) 10%,transparent)}
+:root[data-theme=dark] .motion-nav-indicator{background:linear-gradient(180deg,rgb(255 255 255/.13),rgb(255 255 255/.05)),color-mix(in srgb,var(--accent-soft) 70%,transparent);box-shadow:var(--lg-drop-sm),inset 0 1px 0 rgb(255 255 255/.2),inset 0 0 0 1px rgb(255 255 255/.07)}
+.motion-nav-indicator::before{left:5px;width:3px;height:16px;margin-top:-8px;border-radius:3px;box-shadow:0 0 10px 1px color-mix(in srgb,var(--accent) 55%,transparent)}
+
+/* ---------- 顶栏内容 ---------- */
+.topbar{--lg-glare-size:520px;--lg-blur:10px}
+.desktop-mode .topbar{background-color:var(--lg-tint-strong);--lg-rim-angle:200deg}
+.topbar-actions{gap:6px}
+.connection-label{padding:6px 12px;border-radius:999px;background:var(--lg-fill);box-shadow:inset 0 0 0 1px var(--lg-line-soft);transition:background .25s,color .25s,box-shadow .3s}
+.connection-label:hover{background:var(--lg-fill-hover);box-shadow:inset 0 0 0 1px var(--lg-line),var(--lg-drop-xs)}
+.topbar-divider{width:1px;height:20px;background:var(--lg-hair)}
+/* 顶栏本身是玻璃层，内部菜单的 backdrop-filter 只能取到顶栏内容、取不到下方页面，改用近实色保证可读 */
+.topbar .action-menu>div{background-color:var(--lg-solid)}
+.topbar-more>summary.button{border-radius:999px;padding:0 16px}
+
+/* ---------- 卡片：轻玻璃 ---------- */
+.card{background-color:var(--lg-card);border-color:var(--lg-line);box-shadow:var(--lg-drop-sm),inset 0 1px 0 rgb(255 255 255/.75);border-radius:18px}
+:root[data-theme=dark] .card{box-shadow:var(--lg-drop-sm),inset 0 1px 0 rgb(255 255 255/.06)}
+.service-node,.mode-option,.role-item,.reader-steps span,.scope-tag{background-color:var(--lg-fill);border-color:var(--lg-line-soft)}
+.service-node{border-radius:14px;box-shadow:inset 0 1px 0 rgb(255 255 255/.6)}
+:root[data-theme=dark] .service-node{box-shadow:inset 0 1px 0 rgb(255 255 255/.05)}
+.mode-option,.role-item,.chat-picker-item{border-radius:13px}
+.mode-option.selected,.role-item.selected{background:linear-gradient(180deg,rgb(255 255 255/.55),rgb(255 255 255/.15)),var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 55%,transparent);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.9)}
+:root[data-theme=dark] :is(.mode-option.selected,.role-item.selected){background:linear-gradient(180deg,rgb(255 255 255/.08),rgb(255 255 255/0)),var(--accent-soft);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.08)}
+.role-item:hover,.chat-picker-item:hover{background-color:var(--lg-fill-hover)}
+.chat-picker-item[aria-current=true]{background:linear-gradient(180deg,rgb(255 255 255/.5),rgb(255 255 255/.1)),var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 50%,transparent);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.85)}
+:root[data-theme=dark] .chat-picker-item[aria-current=true]{background:linear-gradient(180deg,rgb(255 255 255/.07),rgb(255 255 255/0)),var(--accent-soft);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.07)}
+.avatar{border-radius:11px;background:linear-gradient(160deg,rgb(255 255 255/.6),rgb(255 255 255/0) 60%),var(--accent-soft);box-shadow:inset 0 0 0 1px var(--lg-line-soft),var(--lg-drop-xs)}
+:root[data-theme=dark] .avatar{background:linear-gradient(160deg,rgb(255 255 255/.1),rgb(255 255 255/0) 60%),var(--accent-soft)}
+.metric-value{background:linear-gradient(180deg,var(--text),color-mix(in srgb,var(--text) 62%,var(--accent)));-webkit-background-clip:text;background-clip:text;color:transparent}
+.metric-value span{-webkit-text-fill-color:var(--muted)}
+th{background:color-mix(in srgb,var(--surface-2) 55%,transparent)}
+tbody tr:hover{background:var(--lg-fill)}
+.log-view,.job-panel pre{background:color-mix(in srgb,var(--surface-2) 55%,transparent)}
+.status-tag{border-radius:999px;padding:4px 9px;box-shadow:inset 0 0 0 1px var(--lg-line-soft)}
+.power-bottom,.recent-row,.settings-summary>div,.switch-row,.tool-row,.session-details,.chat-facts>div,td,.assistant-task-list>article,details.advanced,.job-header,.modal-header{border-color:var(--lg-hair)}
+
+/* 概览指标卡与电源卡：随指针微倾斜。
+   倾斜轴与角度由 liquid-glass.js 写入 --lg-tilt-*，透视写在卡片自身的 transform 中，
+   不在父级设置 perspective（那会让整个网格成为层叠上下文，压住弹出菜单）。 */
+.metrics>.card,.metrics>.card:hover,.power-card,.power-card:hover{transform:perspective(900px) rotate3d(var(--lg-tilt-x,1),var(--lg-tilt-y,0),0,var(--lg-tilt,0deg)) translateY(var(--lg-lift,0px))}
+.metrics>.card:hover,.power-card:hover{--lg-lift:-3px}
+.metrics>.card.lg-tilting,.power-card.lg-tilting{transition:--motion-spot .45s var(--ease-out),border-color .35s var(--ease-out),box-shadow .45s var(--ease-out),transform .15s var(--ease-out)}
+
+/* ---------- 标题：入场时一道光掠过 ---------- */
+#page-title{background:linear-gradient(100deg,var(--text) 0 42%,var(--accent) 50%,var(--text) 58% 100%) 0 0/260% 100%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.page-heading.motion-enter h1{animation:motion-title .7s var(--ease-out) both,lg-title-sheen 1.5s var(--ease-out) .18s both}
+@keyframes lg-title-sheen{from{background-position:100% 0}to{background-position:0 0}}
+
+/* ---------- 按钮：玻璃质感 + 悬停掠光 ----------
+   掠光是一层渐变背景：悬停时 background-position 用 .9s 扫过，离开时 0s 复位，避免反向扫回。 */
+.button{border-radius:11px;border-color:var(--lg-line);background-color:var(--lg-fill);
+  background-image:linear-gradient(110deg,transparent 36%,rgb(255 255 255/.6) 50%,transparent 64%);background-size:260% 100%;background-repeat:no-repeat;background-position:160% 0;
+  box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.8);
+  transition:background-color .25s,background-position 0s,border-color .25s,color .2s,box-shadow .3s var(--ease-out),transform .35s var(--ease-spring)}
+.button:hover:not(:disabled){background-color:var(--lg-fill-hover);background-position:-60% 0;box-shadow:var(--lg-drop-sm),inset 0 1px 0 rgb(255 255 255/.95);
+  transition:background-color .25s,background-position .9s var(--ease-out),border-color .25s,color .2s,box-shadow .3s var(--ease-out),transform .35s var(--ease-spring)}
+:root[data-theme=dark] .button{background-image:linear-gradient(110deg,transparent 36%,rgb(255 255 255/.12) 50%,transparent 64%);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.07)}
+:root[data-theme=dark] .button:hover:not(:disabled){box-shadow:var(--lg-drop-sm),inset 0 1px 0 rgb(255 255 255/.12)}
+.button.primary,.button.primary:hover:not(:disabled){border-color:var(--accent)}
+.button.primary{background-color:var(--accent);
+  background-image:linear-gradient(110deg,transparent 36%,rgb(255 255 255/.38) 50%,transparent 64%),linear-gradient(180deg,rgb(255 255 255/.24),rgb(255 255 255/0) 55%);background-size:260% 100%,100% 100%;background-position:160% 0,0 0;
+  box-shadow:0 8px 18px -10px color-mix(in srgb,var(--accent) 85%,transparent),inset 0 1px 0 rgb(255 255 255/.42),inset 0 -1px 0 rgb(0 0 0/.12)}
+.button.primary:hover:not(:disabled){background-color:var(--accent-hover);background-position:-60% 0,0 0;box-shadow:0 12px 24px -10px color-mix(in srgb,var(--accent) 90%,transparent),inset 0 1px 0 rgb(255 255 255/.5),inset 0 -1px 0 rgb(0 0 0/.12)}
+.icon-button{border-radius:11px}
+.icon-button:hover{background:var(--lg-fill-hover);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.85),inset 0 0 0 1px var(--lg-line-soft)}
+:root[data-theme=dark] .icon-button:hover{box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.08),inset 0 0 0 1px var(--lg-line-soft)}
+
+/* ---------- 概览电源键：液态玻璃水珠（::before 已被 motion.css 用作加载光环，高光用 ::after） ---------- */
+.power-control{border-radius:26px;border:1px solid rgb(255 255 255/.75);color:var(--accent-text);
+  background:radial-gradient(120% 120% at 30% 18%,rgb(255 255 255/.95),rgb(255 255 255/.4) 46%,color-mix(in srgb,var(--accent-soft) 85%,transparent) 100%);
+  box-shadow:0 14px 28px -14px color-mix(in srgb,var(--accent) 60%,transparent),inset 0 2px 1px rgb(255 255 255/.95),inset 0 -8px 14px -6px color-mix(in srgb,var(--accent) 28%,transparent),inset 0 0 0 1px rgb(255 255 255/.45)}
+.power-control::after{content:'';position:absolute;left:12%;right:12%;top:6%;height:40%;border-radius:20px 20px 50% 50%;background:linear-gradient(180deg,rgb(255 255 255/.8),rgb(255 255 255/0));pointer-events:none;opacity:.75;transition:opacity .3s,transform .5s var(--ease-spring)}
+.power-control:hover::after{transform:translateY(-2px) scaleX(1.05);opacity:.95}
+.power-control svg{position:relative;z-index:1;filter:drop-shadow(0 1px 0 rgb(255 255 255/.6))}
+.power-control:hover{background:radial-gradient(120% 120% at 30% 18%,rgb(255 255 255/1),rgb(255 255 255/.5) 46%,color-mix(in srgb,var(--accent-soft) 95%,transparent) 100%)}
+.power-control.active{border-color:color-mix(in srgb,var(--accent) 40%,rgb(255 255 255/.6));color:var(--on-accent);
+  background:radial-gradient(120% 120% at 30% 12%,color-mix(in srgb,var(--accent) 45%,#fff),var(--accent) 55%,var(--accent-hover) 100%)}
+.power-control.active svg{filter:drop-shadow(0 1px 1px rgb(0 0 0/.2))}
+.power-control.active::after{opacity:.55}
+:root[data-theme=dark] .power-control{border-color:rgb(255 255 255/.14);background:radial-gradient(120% 120% at 30% 18%,rgb(255 255 255/.18),rgb(255 255 255/.04) 50%,var(--accent-soft) 100%);box-shadow:0 14px 28px -14px rgb(0 0 0/.7),inset 0 1px 1px rgb(255 255 255/.22),inset 0 -8px 14px -6px rgb(0 0 0/.35)}
+:root[data-theme=dark] .power-control::after{opacity:.18}
+:root[data-theme=dark] .power-control.active{background:radial-gradient(120% 120% at 30% 12%,color-mix(in srgb,var(--accent) 60%,#fff),var(--accent) 55%,color-mix(in srgb,var(--accent) 70%,#000))}
+/* 覆盖 motion.css 的同名关键帧：呼吸光晕之外保留水珠的内高光 */
+@keyframes motion-breathe{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 38%,transparent),0 12px 26px -12px color-mix(in srgb,var(--accent) 80%,transparent),inset 0 2px 1px rgb(255 255 255/.55),inset 0 -8px 14px -6px rgb(0 0 0/.18)}
+  50%{box-shadow:0 0 0 14px color-mix(in srgb,var(--accent) 0%,transparent),0 18px 34px -12px color-mix(in srgb,var(--accent) 90%,transparent),inset 0 2px 1px rgb(255 255 255/.55),inset 0 -8px 14px -6px rgb(0 0 0/.18)}
+}
+
+/* ---------- 分段控件与标签页：液态滑块 ----------
+   .lg-thumb 由 liquid-glass.js 插入并定位；存在滑块时（.lg-has-thumb）选中项本身的底色让给滑块。 */
+.segmented,.workspace-tabs{position:relative}
+.segmented{background:color-mix(in srgb,var(--surface-3) 60%,transparent);box-shadow:var(--lg-well);border-radius:13px;padding:4px;gap:2px}
+.segmented button{border-radius:10px;position:relative;z-index:1}
+.segmented button.selected{background:var(--lg-fill-hover);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.9)}
+.workspace-tabs{border-bottom-color:var(--lg-hair)}
+.workspace-tabs>a,.workspace-tabs>button{border-radius:12px;position:relative;z-index:1}
+.lg-thumb{position:absolute;left:0;top:0;z-index:0;pointer-events:none;border-radius:10px;transform-origin:50% 50%;will-change:transform,width}
+.segmented>.lg-thumb{background:linear-gradient(180deg,rgb(255 255 255/.95),rgb(255 255 255/.7));box-shadow:var(--lg-drop-xs),inset 0 1px 0 #fff,inset 0 0 0 1px rgb(255 255 255/.6)}
+.workspace-tabs>.lg-thumb{border-radius:12px;background:linear-gradient(180deg,rgb(255 255 255/.7),rgb(255 255 255/.3)),var(--accent-soft);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.9),inset 0 0 0 1px color-mix(in srgb,var(--accent) 16%,transparent)}
+:root[data-theme=dark] .segmented>.lg-thumb{background:linear-gradient(180deg,rgb(255 255 255/.16),rgb(255 255 255/.08));box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.18)}
+:root[data-theme=dark] .workspace-tabs>.lg-thumb{background:linear-gradient(180deg,rgb(255 255 255/.1),rgb(255 255 255/.02)),var(--accent-soft);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.12)}
+.lg-has-thumb>button.selected,.lg-has-thumb>[aria-current=page],.lg-has-thumb>[aria-pressed=true]{background:transparent!important;box-shadow:none;border-color:transparent;animation:none}
+
+/* ---------- 开关：按下时滑块化作玻璃透镜 ---------- */
+.switch-track{box-shadow:var(--lg-well)}
+.switch-control input:checked+.switch-track{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 78%,#fff),var(--accent));box-shadow:inset 0 1px 2px rgb(0 0 0/.16),0 0 14px -3px color-mix(in srgb,var(--accent) 70%,transparent)}
+.switch-track::after{background:linear-gradient(180deg,#fff,#eef3f0);box-shadow:0 2px 5px rgb(0 0 0/.2),inset 0 1px 0 #fff;transition:transform .5s var(--ease-spring),width .3s var(--ease-out),background .3s,box-shadow .3s}
+:root[data-theme=dark] .switch-track::after{background:linear-gradient(180deg,#f2f6f3,#cfd9d3)}
+:root[data-theme=dark] .switch-control input:checked+.switch-track::after{background:linear-gradient(180deg,#fff,#e2ebe5)}
+.switch-control:active .switch-track::after,.switch-control:active input:checked+.switch-track::after{width:21px;background:rgb(255 255 255/.32);box-shadow:0 4px 10px rgb(0 0 0/.16),inset 0 0 0 1px rgb(255 255 255/.95),inset 0 1px 1px #fff,inset 0 -2px 4px rgb(0 0 0/.08)}
+.switch-control:active .switch-track::after{transform:scale(1.3)}
+.switch-control:active input:checked+.switch-track::after{transform:translateX(9px) scale(1.3)}
+
+/* ---------- 输入框：内凹玻璃 ---------- */
+input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{border-radius:11px;background-color:var(--lg-fill);border-color:var(--lg-line);box-shadow:inset 0 1px 2px rgb(24 56 40/.07)}
+:root[data-theme=dark] :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea){box-shadow:inset 0 1px 3px rgb(0 0 0/.3)}
+input:not([type=checkbox]):not([type=radio]):not([type=range]):hover,select:hover,textarea:hover{border-color:color-mix(in srgb,var(--accent) 30%,var(--lg-line))}
+
+/* ---------- 横幅提示：彩色玻璃 ---------- */
+.notice{border-radius:14px;background-color:color-mix(in srgb,var(--warn-soft) 76%,transparent);border:1px solid color-mix(in srgb,var(--warn) 18%,transparent);box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.55);-webkit-backdrop-filter:blur(12px) saturate(160%);backdrop-filter:blur(12px) saturate(160%)}
+.error-notice{background-color:color-mix(in srgb,var(--error-soft) 78%,transparent);border-color:color-mix(in srgb,var(--error) 20%,transparent)}
+.notice.plain{background-color:var(--lg-fill);border-color:var(--lg-line-soft)}
+:root[data-theme=dark] .notice{box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.06)}
+
+/* ---------- 弹窗：厚玻璃 ---------- */
+dialog{--lg-blur:30px;--lg-glare-size:620px;background-color:var(--lg-tint-strong);border:1px solid var(--lg-line);border-radius:26px;box-shadow:0 46px 90px -34px rgb(16 40 28/.5),0 10px 24px -12px rgb(16 40 28/.2),var(--lg-inner)}
+:root[data-theme=dark] dialog{box-shadow:0 46px 90px -30px rgb(0 0 0/.8),var(--lg-inner)}
+dialog[open]::backdrop{background-color:color-mix(in srgb,var(--overlay) 70%,transparent);-webkit-backdrop-filter:blur(10px) saturate(140%);backdrop-filter:blur(10px) saturate(140%)}
+
+/* ---------- 下拉菜单 ---------- */
+.action-menu>div{border-radius:16px;padding:6px;--lg-glare-size:240px}
+.action-menu>div>button,.topbar-more>div .button{border-radius:10px}
+.action-menu>div>button:hover{background:var(--lg-fill-hover)}
+
+/* ---------- Toast：胶囊玻璃（浅色主题用深色玻璃，深色主题用浅色玻璃） ---------- */
+.toast{border-radius:999px;padding:11px 20px;color:#f3f7f4;border:1px solid rgb(255 255 255/.14);
+  background-color:rgb(26 38 32/.72);background-image:linear-gradient(180deg,rgb(255 255 255/.12),rgb(255 255 255/0) 60%);
+  -webkit-backdrop-filter:blur(18px) saturate(180%);backdrop-filter:blur(18px) var(--lg-filter,) saturate(180%);
+  box-shadow:0 20px 40px -16px rgb(0 0 0/.45),inset 0 1px 0 rgb(255 255 255/.2);--lg-rim-hi:rgb(255 255 255/.35);--lg-rim-lo:rgb(255 255 255/0)}
+:root[data-theme=dark] .toast{color:#15201a;background-color:rgb(236 243 239/.8);background-image:linear-gradient(180deg,rgb(255 255 255/.5),rgb(255 255 255/0) 60%);box-shadow:0 20px 40px -16px rgb(0 0 0/.6),inset 0 1px 0 #fff;--lg-rim-hi:rgb(255 255 255/.9)}
+
+/* ---------- 保存栏与操作进度面板 ---------- */
+.save-bar{border-radius:20px;border-color:color-mix(in srgb,var(--accent) 35%,var(--lg-line-soft));--lg-glare-size:520px}
+/* 覆盖 motion.css 的同名关键帧：脉冲光圈叠加在玻璃阴影之上 */
+@keyframes motion-border-glow{0%,100%{box-shadow:var(--lg-drop),var(--lg-inner),0 0 0 0 var(--motion-glow)}50%{box-shadow:var(--lg-drop),var(--lg-inner),0 0 0 6px transparent}}
+.job-panel{border-radius:20px;--lg-glare-size:420px}
+
+/* ---------- 滚动条 ---------- */
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}
+::-webkit-scrollbar-thumb{background-color:color-mix(in srgb,var(--muted) 34%,transparent);border:3px solid transparent;border-radius:11px;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background-color:color-mix(in srgb,var(--muted) 58%,transparent)}
+
+/* ==========================================================================
+   6. 回退：不支持毛玻璃 / 系统要求减少透明度 / 减少动态效果
+   ========================================================================== */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .sidebar,.topbar,dialog,.save-bar,.job-panel,.action-menu>div,.notice{background-color:var(--surface)}
+  .toast{background-color:var(--text);color:var(--surface)}
+}
+@media(prefers-reduced-transparency:reduce){
+  .sidebar,.topbar,dialog,.save-bar,.job-panel,.action-menu>div,.card,.toast,.notice,body.has-wallpaper .sidebar,body.has-wallpaper .topbar,body.has-wallpaper .card,body.has-wallpaper .page-heading{-webkit-backdrop-filter:none;backdrop-filter:none}
+  .sidebar,.topbar,dialog,.save-bar,.job-panel,.action-menu>div,.card,body.has-wallpaper .sidebar,body.has-wallpaper .topbar,body.has-wallpaper .card{background-color:var(--surface)}
+  .toast{background-color:var(--text);color:var(--surface)}
+}
+@media(prefers-reduced-motion:reduce){
+  .motion-ambient{transform:none}
+}

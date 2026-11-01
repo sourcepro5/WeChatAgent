@@ -44,6 +44,12 @@ export function runConsoleCommand(spec, onOutput, { cwd, env = process.env, time
 }
 
 export function taskFailureMessage(output, code) {
+  if (/CLIENT_PIN_SCOPE_REQUIRED|CLIENT_PIN_LINK_REFUSED/.test(output)) return '客户端保护仅支持项目 state/hook 下没有目录链接的独立微信。请检查连接设置中的微信路径。';
+  if (/CLIENT_PIN_VERSION_MISMATCH|CLIENT_PIN_SIGNATURE_INVALID/.test(output)) return '客户端保护未启用：微信版本或腾讯数字签名不符合当前配置，请选择匹配的原版客户端。';
+  if (/CLIENT_PIN_UPDATER_RUNNING/.test(output)) return '所选微信的更新器正在运行。请正常退出该微信及更新器，再开启保护。';
+  if (/CLIENT_PIN_BUSY/.test(output)) return '这个微信目录正在修改保护状态，请等待当前操作结束后重试。';
+  if (/CLIENT_PIN_BACKUP_CHANGED|CLIENT_PIN_RESTORE_CONFLICT|CLIENT_PIN_RECOVERY_REQUIRED/.test(output)) return '客户端保护备份或更新器文件与记录不一致，未覆盖现有文件。请保留详细日志和 state/hook/client-pins 下的恢复记录。';
+  if (/CLIENT_PIN_ACL_FAILED|CLIENT_PIN_PROTECTED_CHILD/.test(output)) return '客户端目录权限无法安全调整，请检查当前 Windows 用户的权限和下方错误。已保存的恢复记录位于 state/hook/client-pins。';
   if (/DSH_NOT_CONFIGURED/.test(output)) return '请先在“首次配置”点击“下载安装 DSH”，安装后选择 DSH 程序位置并保存设置。';
   if (/DSH_PLUGIN_NOT_READY/.test(output)) return 'DSH 插件尚未就绪，请在 DSH 添加并启用本机插件，再从托盘完整退出并重新打开 DSH。';
   const port=/\bport=(\d{1,5})\b/.exec(output)?.[1],portLabel=port?'端口 '+port:'配置端口';
@@ -58,6 +64,7 @@ export function taskFailureMessage(output, code) {
   if (/READER_PORT_UNAVAILABLE/.test(output)) return '读取服务端口已被占用或被 Windows 拒绝。请在连接设置中修改微信读取端口，再启动服务；端口可能被未监听的其他程序占用。';
   if (/port is used by another installation|port is already in use|EADDRINUSE|address already in use/i.test(output)) return '配置端口已被占用。点击“检查占用进程”，核对程序后可选择停止，再重试。';
   if (/WECHAT_OTHER_CLIENT_RUNNING/.test(output)) return '检测到其他版本的微信正在运行。请先从微信托盘正常退出，再点击“打开微信”启动连接设置中的匹配版本。';
+  if (/WECHAT_CLIENT_PATH_UNAVAILABLE/.test(output)) return '微信进程路径暂时无法核对。请等待微信完成启动后重试；持续出现时，检查所选程序的权限及占用进程。';
   if (/WECHAT_STARTUP_TIMEOUT/.test(output)) return '已尝试打开匹配微信，但它尚未完成启动。请查看微信窗口是否提示升级或启动失败；确认后再重试。';
   if (/WECHAT_LAUNCH_FAILED/.test(output)) return 'Windows 未能打开所选微信程序。请检查连接设置中的程序路径，并查看下方具体启动错误。';
   if (/HOOK_PROFILE_MISMATCH/.test(output)) return '微信版本或已加载的发送组件不匹配。请正常退出该微信后重新打开，并确认使用对应版本的组件。';

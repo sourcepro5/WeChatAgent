@@ -5,7 +5,8 @@ function Open-HookClient([string]$Executable,[string]$BaseUrl,[ValidateRange(0,1
     $clients=@(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object {$_.CommandLine -notmatch '--type=|--crashpad-handler'})
     $matching=@($clients | Where-Object {$_.ExecutablePath -eq $Executable})
     if($matching.Count -gt 1){throw 'WECHAT_MULTIPLE_MATCHING_CLIENTS'}
-    if(@($clients | Where-Object {$_.ExecutablePath -ne $Executable}).Count){throw 'WECHAT_OTHER_CLIENT_RUNNING: Exit the other WeChat normally before opening the configured client.'}
+    if(@($clients | Where-Object {$_.ExecutablePath -and $_.ExecutablePath -ne $Executable}).Count){throw 'WECHAT_OTHER_CLIENT_RUNNING: Exit the other WeChat normally before opening the configured client.'}
+    if(@($clients | Where-Object {-not $_.ExecutablePath}).Count){throw 'WECHAT_CLIENT_PATH_UNAVAILABLE: Existing WeChat process identity is not available; retry after startup finishes.'}
     if(-not $matching.Count){
         if(@(Get-NetTCPConnection -LocalPort $uri.Port -State Listen -ErrorAction SilentlyContinue).Count){throw 'HOOK_PORT_OWNER_MISMATCH'}
         Write-Output 'Starting the configured WeChat client...'
@@ -15,9 +16,10 @@ function Open-HookClient([string]$Executable,[string]$BaseUrl,[ValidateRange(0,1
     $watch=[Diagnostics.Stopwatch]::StartNew()
     do {
         $clients=@(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object {$_.CommandLine -notmatch '--type=|--crashpad-handler'})
-        if(@($clients | Where-Object {$_.ExecutablePath -ne $Executable}).Count){throw 'WECHAT_OTHER_CLIENT_RUNNING'}
+        if(@($clients | Where-Object {$_.ExecutablePath -and $_.ExecutablePath -ne $Executable}).Count){throw 'WECHAT_OTHER_CLIENT_RUNNING'}
+        $unresolved=@($clients | Where-Object {-not $_.ExecutablePath})
         $matching=@($clients | Where-Object {$_.ExecutablePath -eq $Executable})
-        if($matching.Count -eq 1){
+        if($matching.Count -eq 1 -and -not $unresolved.Count){
             try{
                 $client=Get-Process -Id ([int]$matching[0].ProcessId) -ErrorAction Stop
                 if(-not $client.HasExited -and $client.Path -eq $Executable -and @($client.Modules | Where-Object {$_.ModuleName -eq 'Weixin.dll'}).Count){
@@ -29,6 +31,7 @@ function Open-HookClient([string]$Executable,[string]$BaseUrl,[ValidateRange(0,1
         if($watch.Elapsed.TotalSeconds -ge $TimeoutSeconds){break}
         Start-Sleep -Milliseconds 200
     }while($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    if($unresolved.Count){throw 'WECHAT_CLIENT_PATH_UNAVAILABLE: WeChat process identity did not become available before the startup deadline.'}
     throw 'WECHAT_STARTUP_TIMEOUT: The configured WeChat did not finish loading its core.'
 }
 

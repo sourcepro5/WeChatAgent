@@ -40,3 +40,8 @@ version.dll 的加载入口只安排初始化工作；核心模块 Weixin.dll �
 在运行日志查看 hook-init.log：waiting_for_weixin_dll 表示等待核心模块，weixin_dll_ready 表示模块已就绪，http_listening 表示端口已绑定，initialization_ready 表示初始化完成；module_wait_timeout 表示等待超时，http_bind_failed 表示端口无法绑定。日志不记录令牌、读取密钥或聊天内容。
 
 升级需从托盘完整退出匹配微信后再通过助手“打开微信”，以加载新的 DLL。
+
+
+## 按客户端隔离的保护与恢复
+
+当前保护同时支持 4.1.10.27 与 4.1.15.13，使用 `state/hook/client-pins/` 分别保存权限和更新器恢复记录。旧 `client-pin-acl.json` 保留兼容读取，新的保护状态以按目录隔离的记录为准。具体开启、解除及边界见[客户端保护说明](CLIENT_PROTECTION.md)。

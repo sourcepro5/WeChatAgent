@@ -61,8 +61,8 @@ const actions = {
   'reader-connect': ['连接并验证微信', '正在获取并验证所选账号的读取凭据。请在微信中完成登录。'],
   'hook-check': ['检查发送连接', '校验发送组件、微信版本和账号。'],
   'hook-build': ['构建发送组件', '使用现有构建脚本，需要已准备的源码与 C++ 工具。'],
-  'hook-pin': ['开启客户端保护', '对本项目的匹配微信目录设置写保护，并停用目录内的更新程序。'],
-  'hook-unpin': ['解除客户端保护', '恢复此前备份的目录权限。'],
+  'hook-pin': ['开启客户端保护', '备份所选独立微信的权限和更新器，再保护程序目录。只作用于本项目 state/hook 下的客户端。'],
+  'hook-unpin': ['解除客户端保护', '恢复该客户端本轮保护前的权限及本轮停用的更新器。再次打开匹配微信时会自动启用保护。'],
   'sessions-configure': ['同步会话名称', '按聊天名称和当前人格更新 DSH 会话名称。'],
   'sessions-compact': ['压缩上下文', '在同一 DSH 会话内生成摘要，这会调用模型。'],
 };
@@ -398,7 +398,7 @@ function connectionsPage() {
 }
 function toolsPage() {
   const row = (title, help, action, label = '执行') => `<div class="tool-row"><div><h3>${title}</h3><p>${help}</p></div><button class="button" data-action="${action}">${label}</button></div>`;
-  return `<div class="tool-grid"><section class="card">${header('发送组件', '', '', 'tool')}${row('构建原生发送组件', '需已有匹配源码和 C++ 构建工具。', 'hook-build', '构建')}</section><section class="card">${header('客户端维护', '', '', 'shield')}${row('开启客户端写保护', '只作用于项目 state/hook 下的客户端目录。', 'hook-pin', '开启')}${row('解除客户端写保护', '恢复原有目录权限；不修改版本适配。', 'hook-unpin', '解除')}<p class="subtle space-top">目录保护不保证旧版微信持续可登录。</p></section><section class="card">${header('依赖维护','通常只供开发环境使用。','','tool')}${row('安装项目依赖','使用原安装脚本检查或安装依赖。','setup','安装')}</section></div>`;
+  return `<div class="tool-grid"><section class="card">${header('发送组件', '', '', 'tool')}${row('构建原生发送组件', '需已有匹配源码和 C++ 构建工具。', 'hook-build', '构建')}</section><section class="card">${header('客户端维护', '', '', 'shield')}${row('开启客户端写保护', '备份权限与更新器，并保护所选独立微信程序目录。', 'hook-pin', '开启')}${row('解除客户端写保护', '恢复本轮备份的权限及本轮停用的更新器。', 'hook-unpin', '解除')}<p class="subtle space-top">目录保护不保证旧版微信持续可登录。</p></section><section class="card">${header('依赖维护','通常只供开发环境使用。','','tool')}${row('安装项目依赖','使用原安装脚本检查或安装依赖。','setup','安装')}</section></div>`;
 }
 function setupPage() {
   return `<div class="section-stack"><div class="notice plain">${icon('shield')}<span>此安装包使用独立的本机数据目录。账号、读取凭据和允许的聊天需要由你配置，初始允许的聊天为空。</span></div><p class="subtle"><a class="text-link" href="https://github.com/sourcepro5/WeChatAgent" target="_blank" rel="noopener noreferrer">觉得好用去GitHub上点个star吧 ${icon('arrow')}</a></p><div class="tool-grid setup-grid">

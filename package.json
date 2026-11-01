@@ -1,6 +1,6 @@
 {
   "name": "wechatagent",
-  "version": "0.4.1+plus",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "description": "Personal WeChat AI friend with NT reader, WeChat-Hook, OneBot v11 and an existing DSH Desktop",
@@ -65,7 +65,8 @@
     "test:speech-protocol": "node --test scripts/test-speech-protocol.mjs",
     "test:release-version": "node --test scripts/test-release-version.mjs scripts/test-public-update-check.mjs",
     "test:sessions": "node --test scripts/test-dsh-sessions-cli.mjs",
-    "test:hook-41513": "node --test scripts/test-hook-41513.mjs scripts/test-hook-native-apis-41513.mjs"
+    "test:hook-41513": "node --test scripts/test-hook-41513.mjs scripts/test-hook-native-apis-41513.mjs",
+    "test:client-pin": "node --test scripts/test-client-pin.mjs"
   },
   "devDependencies": {
     "@electron/asar": "3.4.1",
@@ -75,5 +76,5 @@
     "sharp": "0.34.5",
     "resedit": "1.7.2"
   },
-  "releaseVersion": "0.4.1+"
+  "releaseVersion": "0.4.2"
 }
