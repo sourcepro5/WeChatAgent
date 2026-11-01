@@ -57,16 +57,13 @@ def derive_database_key(path, fallback_key, fallback_salt, passphrase=''):
     import hashlib
     if not passphrase:
         return fallback_key, fallback_salt
-    try:
-        with open(path, 'rb') as fh:
-            salt = fh.read(16)
-        if len(salt) != 16:
-            return fallback_key, fallback_salt
-        raw_passphrase = bytes.fromhex(passphrase)
-        key = hashlib.pbkdf2_hmac('sha512', raw_passphrase, salt, 256000, 32).hex()
-        return key, salt.hex()
-    except (OSError, ValueError):
-        return fallback_key, fallback_salt
+    with open(path, 'rb') as fh:
+        salt = fh.read(16)
+    if len(salt) != 16:
+        raise ValueError('invalid or truncated salt header in %r' % (path,))
+    raw_passphrase = bytes.fromhex(passphrase)
+    key = hashlib.pbkdf2_hmac('sha512', raw_passphrase, salt, 256000, 32).hex()
+    return key, salt.hex()
 
 
 def table_columns(cursor, table):
