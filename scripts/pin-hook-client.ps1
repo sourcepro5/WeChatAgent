@@ -75,7 +75,7 @@ function Get-PinTarget([string]$Root){
     return [pscustomobject]@{root=$Root;scope=$scope;store=$store;key=$key;directory=$directory;exe=$exe;version=[string]$config.hook.expectedVersion;sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value}
 }
 function Assert-PinRecord($Target,$Record,[string]$KeyDirectory){
-    if($Record.schemaVersion -ne 2 -or $Record.path -ne $Target.directory -or $Record.sid -ne $Target.sid -or $Record.version -notin @('4.1.10.27','4.1.15.13') -or $Record.generation -notmatch '^[a-f0-9]{32}$'){throw 'CLIENT_PIN_BACKUP_CHANGED: Backup identity mismatch.'}
+    if($Record.schemaVersion -ne 2 -or $Record.path -ne $Target.directory -or $Record.sid -ne $Target.sid -or $Record.version -notin @('4.1.10.27','4.1.15.13','4.2.0.12') -or $Record.generation -notmatch '^[a-f0-9]{32}$'){throw 'CLIENT_PIN_BACKUP_CHANGED: Backup identity mismatch.'}
     Assert-PinDirectory (Join-Path $KeyDirectory $Record.generation)
 }
 function Get-PinUpdaterPaths($Target,$Record){
@@ -106,7 +106,7 @@ function Restore-ClientPin($Target,$Record,[string]$KeyDirectory,[string]$StateF
 function Invoke-ClientPin([string]$Root,[switch]$Unlock,[switch]$Status){
     $target=Get-PinTarget $Root
     if(-not $Unlock -and -not $Status){
-        if($target.version -notin @('4.1.10.27','4.1.15.13') -or (Get-PinFileVersion $target.exe) -ne $target.version){throw 'CLIENT_PIN_VERSION_MISMATCH'}
+        if($target.version -notin @('4.1.10.27','4.1.15.13','4.2.0.12') -or (Get-PinFileVersion $target.exe) -ne $target.version){throw 'CLIENT_PIN_VERSION_MISMATCH'}
         $signature=Get-AuthenticodeSignature -LiteralPath $target.exe
         if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Tencent'){throw 'CLIENT_PIN_SIGNATURE_INVALID'}
     }

@@ -10,13 +10,14 @@ if (-not (Test-Path -LiteralPath $exe)) { throw 'Matching WeChat client missing.
 if ((Get-Item -LiteralPath $exe).VersionInfo.FileVersion -ne $config.hook.expectedVersion) { throw 'Client version mismatch; Hook not installed.' }
 $signature = Get-AuthenticodeSignature -LiteralPath $exe
 if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Tencent') { throw 'WeChat executable signature check failed.' }
-if ($config.hook.expectedVersion -eq '4.1.15.13') {
+if ($config.hook.expectedVersion -in @('4.1.15.13','4.2.0.12')) {
     & (Join-Path $PSScriptRoot 'pin-hook-client.ps1')
     if (-not $PrepareOnly) {
         . (Join-Path $PSScriptRoot 'hook-client-health.ps1')
         Open-HookClient $exe $config.hook.baseUrl
     }
-    & (Join-Path $PSScriptRoot 'load-hook-current.ps1') -Executable $exe -BaseUrl $config.hook.baseUrl -PrepareOnly:$PrepareOnly
+    $loadScript=if($config.hook.expectedVersion -eq '4.2.0.12'){'load-hook-42012.ps1'}else{'load-hook-current.ps1'}
+    & (Join-Path $PSScriptRoot $loadScript) -Executable $exe -BaseUrl $config.hook.baseUrl -PrepareOnly:$PrepareOnly
     exit
 }
 $directory = Split-Path -Parent $exe
