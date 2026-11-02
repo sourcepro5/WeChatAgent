@@ -32,7 +32,7 @@
     "test:shutdown": "node --test scripts/test-desktop-shutdown.mjs scripts/test-desktop-lifecycle.mjs",
     "test:hook-startup": "node --test scripts/test-hook-startup.mjs scripts/test-hook-launcher.mjs scripts/test-hook-repair-ui.mjs scripts/test-hook-repair-api.mjs scripts/test-process-recovery.mjs",
     "test:storage": "node --test scripts/test-installer-directory.mjs scripts/test-data-storage.mjs scripts/test-storage-runtime.mjs",
-    "test:startup": "node --test scripts/test-adapter-startup.mjs scripts/test-hook-startup.mjs scripts/test-process-recovery.mjs scripts/test-hook-repair-api.mjs",
+    "test:startup": "node --test scripts/test-adapter-startup.mjs scripts/test-port-state.mjs scripts/test-hook-startup.mjs scripts/test-process-recovery.mjs scripts/test-hook-repair-api.mjs",
     "test:reply-protocol": "node --test scripts/test-reply-protocol.mjs",
     "test:prompt-policy": "node --test scripts/test-prompt-policy.mjs",
     "test:persona-delete": "node --test scripts/test-persona-delete.mjs",

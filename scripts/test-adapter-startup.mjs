@@ -105,6 +105,7 @@ $root=$PSScriptRoot;$stateDir=$PSScriptRoot;$script:record=@{};$script:owner=777
 function Get-NetTCPConnection{param($LocalPort,$ErrorAction)@([pscustomobject]@{State='Listen';LocalAddress='::';OwningProcess=999},[pscustomobject]@{State='Listen';LocalAddress='127.0.0.1';OwningProcess=777})}
 $ipv4=@(Get-PortBindings 8766);if($ipv4.Count -ne 1 -or $ipv4[0].OwningProcess -ne 777){throw 'IPv6-only listener caused a false IPv4 conflict'}
 function Get-PortBindings{param($Port)$script:queries++;if($script:mode -eq 'race' -and $script:queries -eq 1){return};[pscustomobject]@{State='Listen';OwningProcess=$script:owner}}
+function Test-Port{param([int]$Port)return $true}
 function Invoke-RestMethod{param($Uri,$TimeoutSec)if($script:mode -eq 'legacy'){return [pscustomobject]@{backend='wechat-hook'}};[pscustomobject]@{project='WeChatAgent';component='adapter';statusVersion=1;backend='wechat-hook';pid=$(if($script:mode -eq 'bad-pid'){'invalid'}else{777});projectRoot=$(if($script:mode -eq 'wrong-project'){$root+'-other'}elseif($script:mode -eq 'bad-root'){[string][char]0}else{$root});ready=$true}}
 if(-not(Test-ServiceReady 'adapter' 8766 777)){throw 'owned ready service was rejected'}
 foreach($case in @('wrong-project','legacy','bad-pid','bad-root')){$script:mode=$case;$failed=$false;try{Test-ServiceReady 'adapter' 8766 777|Out-Null}catch{if($_.Exception.Message -notmatch 'ADAPTER_IDENTITY_MISMATCH'){throw};$failed=$true};if(-not $failed){throw 'foreign or legacy identity accepted'}}
@@ -129,7 +130,7 @@ test('supervisor starts and reuses the real owned child only after PID and HTTP 
 param([string]$Manage,[string]$Node,[string]$Entry,[int]$Port)
 $ErrorActionPreference='Stop';$tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($Manage,[ref]$tokens,[ref]$errors)
-foreach($name in @('Save-Record','Owned-Process','Stop-Services','Get-PortBindings','Assert-PortBindable','Test-ServiceReady','Start-ServiceProcess')){$definition=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true);Invoke-Expression $definition.Extent.Text}
+foreach($name in @('Test-Port','Save-Record','Owned-Process','Stop-Services','Get-PortBindings','Assert-PortBindable','Test-ServiceReady','Start-ServiceProcess')){$definition=$ast.Find({param($n)$n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true);Invoke-Expression $definition.Extent.Text}
 $root=$PSScriptRoot;$stateDir=Join-Path $root 'state';$recordFile=Join-Path $stateDir 'runtime.json';$script:record=@{}
 try{
  Start-ServiceProcess 'adapter' $Node ('"'+$Entry+'" '+$Port) $root $Entry $Port $false
