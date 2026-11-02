@@ -3,7 +3,7 @@ import {hookAccountProblem,verifyWeChatAccount} from './wechat-account-check.mjs
 import {createConsole} from './console-server.mjs';
 import {needsWeChatRepair} from '../public/console/process-recovery.js';
 const source=path.resolve(import.meta.dirname,'..'),health={integration:'WeChatAgent-1',backend:'wechat-hook',version:'4.1.10.27',startupState:'ready',pid:123,databaseAccounts:['wxid_b']};
-function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-live-account-')),config=JSON.parse(fs.readFileSync(path.join(source,'config/wechatagent.example.json'),'utf8'));config.ports={weflow:0,onebot:0,adapter:0,dshPlugin:0};
+function fixture(t,version='4.1.10.27'){const root=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-live-account-')),config=JSON.parse(fs.readFileSync(path.join(source,'config/wechatagent.example.json'),'utf8'));config.hook.expectedVersion=version;config.hook.wechatExecutable='state/hook/wechat-'+version+'/Weixin.exe';config.ports={weflow:0,onebot:0,adapter:0,dshPlugin:0};
  const write=(relative,value)=>{const file=path.join(root,relative);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,typeof value==='string'?value:JSON.stringify(value));};
  const a={dbPath:path.join(root,'wxid_a'),myWxid:'wxid_a',decryptKey:'userdpapi:YQ=='},b={dbPath:path.join(root,'wxid_b'),myWxid:'wxid_b',decryptKey:'userdpapi:Yg=='};for(const account of [a,b])fs.mkdirSync(path.join(account.dbPath,'db_storage'),{recursive:true});
  write('config/wechatagent.json',config);write('state/weflow/WeFlow-config.json',a);write('state/wechat-io-config.json',{self_wxid:'wxid_a'});write('state/hook/native-token.txt','c'.repeat(64));
@@ -84,4 +84,13 @@ test('A to B to A uses each live account and restores only that account settings
  assert.equal((await f.wait((await f.connect()).id)).state,'succeeded');assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root,'config/wechatagent.json'))).wechat.whitelist.private,[]);
  account='wxid_a';const revision=(await f.request('/api/reader-config')).revision,next=await f.request('/api/jobs',{action:'reader-connect',revision,dbPath:f.a.dbPath,myWxid:f.a.myWxid,decryptKey:'',autoKey:true});assert.equal((await f.wait(next.id)).state,'succeeded');
  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root,'config/wechatagent.json'))).wechat.whitelist.private,['123']);assert.equal(JSON.parse(fs.readFileSync(path.join(f.root,'state/weflow/WeFlow-config.json'))).decryptKey,f.a.decryptKey);assert.equal(f.stops,2);
+});
+
+
+test('current client account verification accepts only the exact ready profile and selected account',async t=>{
+ const f=fixture(t,'4.1.15.13'),current={...health,version:'4.1.15.13',profile:'4.1.15.13-media-mentions-v2',nativeTextSend:true};
+ assert.equal((await verifyWeChatAccount({...f,settings:f.b,wait:false,fetchImpl:async()=>response(current)})).ready,true);
+ await assert.rejects(verifyWeChatAccount({...f,settings:f.b,wait:false,fetchImpl:async()=>response(health)}),/HOOK_VERSION_MISMATCH/);
+ await assert.rejects(verifyWeChatAccount({...f,settings:f.b,wait:false,fetchImpl:async()=>response({...current,profile:'unknown'})}),/HOOK_INITIALIZATION_PENDING/);
+ await assert.rejects(verifyWeChatAccount({...f,settings:f.b,wait:false,fetchImpl:async()=>response({...current,databaseAccounts:['wxid_a','wxid_b']})}),/HOOK_MULTIPLE_ACCOUNT_DATABASES/);
 });

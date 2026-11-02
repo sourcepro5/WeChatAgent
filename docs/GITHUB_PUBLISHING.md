@@ -1,43 +1,46 @@
-# GitHub 上传 0.4.1+
+# GitHub 发布 0.4.2
 
-仓库：`sourcepro5/WeChatAgent`。发布标题为 `WeChatAgent 0.4.1+`，Tag 为 `v0.4.1+`，按正式 Release 发布。
+仓库：`sourcepro5/WeChatAgent`。新适配位于 `main`，合入前主线保留为 `stable`。发布标题为 `WeChatAgent 0.4.2`，标签为 `v0.4.2`。
 
-在公开版仓库根目录打开 PowerShell。构建完成后，可先预检再运行上传脚本：
+## 发布前核对
+
+在公开版仓库根目录执行。以下命令适用于已经完成本地提交和 `v0.4.2` 标签的构建；任何一步失败后先处理错误。
 
 ```powershell
 gh auth status
-& '.\release\installer\Upload-0.4.1+.ps1' -DryRun
-& '.\release\installer\Upload-0.4.1+.ps1'
-```
-
-未登录时先执行 `gh auth login`。上传脚本会验证源码文件集、全部资源哈希及 origin 地址，然后提交当前公开源码、推送 main 和新 Tag，最后上传 Release 附件。不强推、不覆盖现有 Tag 或 Release；远端有未合并提交时停止，需要合并后重新构建校验。
-
-也可以手动执行以下步骤。任一步失败后先处理错误，再继续：
-
-```powershell
 npm run privacy:check
-node scripts/verify-plugin-release.mjs
-git add -A
-git commit -m 'Release WeChatAgent 0.4.1+'
-git tag -a 'v0.4.1+' -m 'WeChatAgent 0.4.1+'
-git push --atomic origin main 'v0.4.1+'
+npm run release:verify
+git status --short
+git log -1 --oneline
+git show-ref --verify refs/heads/stable
+git show-ref --verify refs/tags/v0.4.2
 ```
 
-确认源码和 Tag 已推送后，创建 Release：
+## 推送源码与分支
 
 ```powershell
-gh release create 'v0.4.1+' `
-  '.\release\installer\WeChatAgent-Setup-0.4.1+-x64.exe' `
-  '.\release\installer\WeChatAgent-0.4.1+-source.zip' `
+git push --atomic origin main stable v0.4.2
+```
+
+该命令同时推送主分支、稳定分支和新标签。保留 #3、#7 的原贡献及本地合并记录；不强推、不改写旧标签。若远端已有其他提交或同名标签，先核对并合并，再重新构建验证。
+
+## 上传 Release 附件
+
+确认推送成功后执行：
+
+```powershell
+gh release create 'v0.4.2' `
+  '.\release\installer\WeChatAgent-Setup-0.4.2-x64.exe' `
+  '.\release\installer\WeChatAgent-0.4.2-source.zip' `
   '.\optional-extensions\packages\fish-notebook-1.0.0.zip' `
   '.\optional-extensions\packages\speech-recognition-1.2.0.zip' `
   '.\release\installer\蓝色大肥鱼-小助手.md' `
   '.\release\installer\SHA256SUMS.txt' `
-  '.\release\installer\VERIFICATION.json' `
+  '.\release\installer\VERIFICATION-0.4.2.json' `
   --repo sourcepro5/WeChatAgent `
   --verify-tag --latest `
-  --title 'WeChatAgent 0.4.1+' `
+  --title 'WeChatAgent 0.4.2' `
   --notes-file RELEASE_NOTES.md
 ```
 
-安装器及本机构建目录不提交进 Git，只作为 Release 附件上传。源码包、可选插件与校验清单须来自同一次最终验证；若提交或合并后更改了源码，应重新构建并验证。
+安装器、构建缓存和个人运行数据不提交到 Git。Release 附件须使用同一轮最终校验的产物；更改源码后需重新构建和验证。构建过程只生成本地文件，不会自动上传。

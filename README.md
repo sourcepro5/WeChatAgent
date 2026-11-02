@@ -17,7 +17,7 @@
 WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 DeepSeek Harness（DSH），还能通过微信交办已授权的任务。
 有问题可以添加Q群：550582874
 
-**[下载安装](https://github.com/sourcepro5/WeChatAgent/releases)** · [快速开始](#快速开始) · [使用教程](#使用教程) · [常见问题](#常见问题) · [更新](RELEASE_NOTES.md)
+**[下载安装](https://github.com/sourcepro5/WeChatAgent/releases)** · [快速开始](#快速开始) · [插件下载](#插件安装) · [使用教程](#使用教程) · [常见问题](#常见问题) · [更新](RELEASE_NOTES.md)
 
 
 ## 能做什么
@@ -124,6 +124,20 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 
 ## 插件安装
 
+### 下载插件包
+
+插件压缩包位于仓库的 [`optional-extensions/packages/`](optional-extensions/packages/) 目录。
+下载源码后可在该目录找到，也可以点击下表直接下载。
+
+| 插件 | 下载 ZIP | 使用说明 |
+| --- | --- | --- |
+| 语音识别 API | [speech-recognition-1.2.0.zip](https://github.com/sourcepro5/WeChatAgent/raw/refs/heads/main/optional-extensions/packages/speech-recognition-1.2.0.zip) | [API 配置与语音转写](docs/VOICE_INPUT.md) |
+| 鱼的记事本 | [fish-notebook-1.0.0.zip](https://github.com/sourcepro5/WeChatAgent/raw/refs/heads/main/optional-extensions/packages/fish-notebook-1.0.0.zip) | [记事本插件说明](docs/FISH_NOTEBOOK.md) |
+
+每个 ZIP 都附有同名的 `.sha256` 校验文件，位于同一目录。安装时直接导入 ZIP，无需解压。
+
+### 安装步骤
+
 在“能力 → 能力目录”拖入 WeChatAgent API v2 插件 ZIP：
 
 1. 核对插件名称、版本与权限。
@@ -135,6 +149,8 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 以插件说明和界面提示为准。
 
 WeChatAgent 插件与 DSH 插件分别管理，安装包不通用。
+
+微信语音可通过单独分发的“语音识别 API”插件转写，再交给当前聊天模型。接口、密钥及模型默认留空，不默认安装或启用；说明见 [语音 API 转写](docs/VOICE_INPUT.md)。插件宿主校验使用 `npm run plugin:check`；源码与安装器构建会检查权限、能力声明及第一方 ZIP 与源码的一致性。
 
 [插件开发规范](docs/PLUGIN_DEVELOPMENT.md)
 · [聊天小便签示例](examples/plugins/chat-notes/)
@@ -218,5 +234,3 @@ DSH 独立管理自己的会话与附件。
 反馈问题。提交时请附上版本、复现步骤和脱敏日志。
 
 <!-- 325328799 -->
-
-微信语音可通过单独分发的“语音识别 API”插件转写，再交给当前聊天模型。接口、密钥及模型默认留空，不默认安装或启用；说明见 [语音 API 转写](docs/VOICE_INPUT.md)。插件宿主校验使用 `npm run plugin:check`；源码与安装器构建会检查权限、能力声明及第一方 ZIP 与源码的一致性。

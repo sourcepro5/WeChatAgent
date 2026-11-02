@@ -5,6 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {assertPluginHost} from './plugin-host-check.mjs';
 import {BUNDLED_PLUGINS} from '../packages/plugin-api/bundled.mjs';
 import {releaseIdentity} from './release-version.mjs';
+import {verifyHookBuild,verifyWeChatClient} from './hook-build-policy.mjs';
 
 const root=path.resolve(import.meta.dirname,'..'),hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const {version,packageVersion}=releaseIdentity(JSON.parse(fs.readFileSync(path.join(root,'package.json'))));
@@ -33,6 +34,16 @@ for(const directory of [stage,unpacked]){
   templateReports.push({buildId:manifest.buildId,files:manifest.files.length,runtimeRevision:manifest.runtimeRevision,builtAt:manifest.builtAt});
 }
 if(templateReports[0].buildId!==templateReports[1].buildId)throw Error('INSTALLER_STAGE_DIVERGED');
+const packagedManifest=JSON.parse(fs.readFileSync(path.join(stage,'deployment.json'),'utf8'));
+const bundledWechatVersion=packagedManifest.wechatVersion??'4.1.10.27';
+const vendorReports=[];
+for(const directory of [path.join(root,'state/installer-stage/vendor'),path.join(root,'release/installer/win-unpacked/resources/vendor')]){
+  verifyWeChatClient(path.join(directory,'wechat'),bundledWechatVersion);
+  verifyHookBuild(path.join(directory,'hook'));
+  const current=bundledWechatVersion==='4.1.15.13'?verifyHookBuild(path.join(directory,'hook-current'),bundledWechatVersion):null;
+  vendorReports.push({version:bundledWechatVersion,clientSha256:hash(fs.readFileSync(path.join(directory,'wechat/Weixin.exe'))),coreSha256:hash(fs.readFileSync(path.join(directory,'wechat',bundledWechatVersion,'Weixin.dll'))),nativeProfile:current?.profile??null,nativeSha256:current?.sha256??null,loaderSha256:current?.loaderSha256??null});
+}
+if(JSON.stringify(vendorReports[0])!==JSON.stringify(vendorReports[1]))throw Error('INSTALLER_VENDOR_RESOURCES_DIVERGED');
 const installerRelative='release/installer/WeChatAgent-Setup-'+version+'-x64.exe',installer=fs.readFileSync(path.join(root,installerRelative));
 const pe=installer.readUInt32LE(0x3c);
 if(installer.toString('ascii',0,2)!=='MZ'||installer.readUInt32LE(pe)!==0x4550)throw Error('INSTALLER_PE_INVALID');
@@ -41,7 +52,7 @@ const roleAsset='release/installer/蓝色大肥鱼-小助手.md';if(fs.existsSyn
 const assetRecords=assets.map(relative=>{const data=fs.readFileSync(path.join(root,relative));return {path:relative,bytes:data.length,sha256:hash(data)};});
 if(assetRecords.find(item=>item.path===sourceReport.asset.path).sha256!==sourceReport.asset.sha256)throw Error('SOURCE_ARCHIVE_CHANGED');
 const report={version,packageVersion,ok:true,...templateReports[0],checkedAt:new Date().toISOString(),pluginHost:sourceAudit.contract,
-  sourcePrivacy:{candidateFiles:privacy.candidateFiles,findings:privacy.findings},templateFilesVerified:templateReports,
+  sourcePrivacy:{candidateFiles:privacy.candidateFiles,findings:privacy.findings},templateFilesVerified:templateReports,bundledWechat:vendorReports[0],
   sourceFiles:sourceReport.sourceFiles,assets:assetRecords,regression:JSON.parse(fs.readFileSync(path.join(root,'release-profile.json'),'utf8')).verification?.publicRegression??null,pluginAutoInstalled:false,pluginAutoEnabled:false,
   servicesRestarted:false,realWeChatStarted:false,actualUserDataUsed:false,publication:'local-build-only',
   validationLimits:['Static packaged-file, host-contract, source-file-set and artifact-hash verification; application installation and live ASR were not performed.','Automated plugin, console, deployment and synthetic voice tests are recorded in docs/PLUGIN_HOST_AUDIT.md.']};

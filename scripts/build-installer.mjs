@@ -7,13 +7,17 @@ import { spawnSync } from 'node:child_process';
 import { buildIcons, embedExecutableIcon } from './build-icons.mjs';
 import { singleDirectoryTemplate } from './installer-directory-page.mjs';
 import { projectRoot as root } from './project-config.mjs';
-import { verifyHookBuild } from './hook-build-policy.mjs';
+import { verifyHookBuild,verifyWeChatClient } from './hook-build-policy.mjs';
 import {assertPluginHost} from './plugin-host-check.mjs';
 import {BUNDLED_PLUGINS} from '../packages/plugin-api/bundled.mjs';
 import {releaseIdentity} from './release-version.mjs';
 
 await assertPluginHost(root);
 verifyHookBuild(path.join(root, 'state/hook/native'));
+const wechatVersion=JSON.parse(fs.readFileSync(path.join(root,'config/wechatagent.example.json'),'utf8')).hook.expectedVersion;
+const clientSource=path.join(root,'state/hook/wechat-'+wechatVersion);
+verifyWeChatClient(clientSource,wechatVersion);
+const currentBuild=wechatVersion==='4.1.15.13'?verifyHookBuild(path.join(root,'state/hook/native-'+wechatVersion),wechatVersion):null;
 
 const {version,packageVersion,buildVersion}=releaseIdentity(JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')));
 const stage = path.join(root, 'state', 'installer-stage');
@@ -52,7 +56,7 @@ fs.writeFileSync(path.join(appDir, 'package.json'), JSON.stringify({ name: 'wech
 await buildIcons(root, appDir, require('sharp'));
 for (const name of ['LICENSE','LICENSES.md']) add(name);
 for (const name of ['README.md','RELEASE_NOTES.md']) add(name);
-add('docs/releases/0.4.1.md');
+add('docs/releases/'+version+'.md');
 addTree('docs', (name, directory) => directory || name.endsWith('.md'));
 add('config/wechatagent.example.json');
 for(const name of ['SESSION_RECOVERY.md','SEND_QUEUE_RECOVERY.md','MEDIA_RECOVERY.md','GROUP_REJOIN.md'])add('docs/'+name);
@@ -81,6 +85,7 @@ add('docs/MEMORY_VIEW.md');
 add('scripts/fish-notebook-console.mjs');
 add('docs/FISH_NOTEBOOK.md');
 add('scripts/hook-client-health.ps1');
+for (const name of ['hook-profiles.mjs','build-hook-current.ps1','load-hook-current.ps1']) add('scripts/'+name);
 add('scripts/stop-legacy-services.ps1');
 const scriptNames = ['wechat_files.py','file-delivery-worker.mjs','project-config.mjs','extension-status.mjs','bundled-extensions.mjs','update-check.mjs','migrate-io-config.mjs','manage.ps1','console-server.mjs','console-process.mjs','console-powershell.ps1','console-native.ps1','sync-weflow.cjs','hook-onebot.mjs','reader-api.py','reader-requirements.txt','wechat_media.py','wechat_sticker.py','wechat_sticker_send.py','wechat_forwarded.py','resolve-wechat-image.py','list-friend-ids.mjs','manage-dsh-sessions.mjs','launch-hook-wechat.ps1','pin-hook-client.ps1','launch-dsh.ps1','check-runtime.ps1','setup.ps1','build-hook.ps1'];
 for (const name of [...scriptNames, 'wechat_group_bindings.py', 'dsh-configuration.mjs', 'process-recovery.mjs', 'process-recovery.ps1', 'check-runtime.py', 'wechat_meme_library.py', 'wechat_sticker_labels.py', 'wechat_image_normalize.py', 'wechat_sticker_collection.py', 'wechat_quote.py', 'text-delivery-store.mjs', 'reader-setup.mjs', 'reader_setup.py', 'reader-account-state.mjs','wechat-account-check.mjs']) add('scripts/' + name);
@@ -121,10 +126,10 @@ await assertPluginHost(project,{compareRoot:root});
 
 copyFile(process.execPath, path.join(stage, 'runtime/node.exe'));
 if (!fs.existsSync(path.join(stage, 'runtime/python/python.exe'))) throw new Error('Run prepare-installer-runtime.mjs first.');
-const clientSource = path.join(root, 'state/hook/wechat-4.1.10.27');
 copyFile(path.join(clientSource, 'Weixin.exe'), path.join(vendor, 'wechat/Weixin.exe'));
-copyTree(path.join(clientSource, '4.1.10.27'), path.join(vendor, 'wechat/4.1.10.27'), name => !/\.disabled$|\.log$|\.token$/.test(name));
+copyTree(path.join(clientSource, wechatVersion), path.join(vendor, 'wechat',wechatVersion), name => !/\.disabled$|\.log$|\.token$/.test(name));
 for (const name of ['version.dll','build.json']) copyFile(path.join(root, 'state/hook/native', name), path.join(vendor, 'hook', name));
+if(currentBuild)for(const name of ['wechatagent-text-4.1.15.13.dll','wechatagent-text-loader.exe','build.json'])copyFile(path.join(root,'state/hook/native-'+wechatVersion,name),path.join(vendor,'hook-current',name));
 const pluginTemplate = path.join(project, 'packages/dsh-social-bridge-plugin/cordis.patch.yml');
 fs.writeFileSync(pluginTemplate, fs.readFileSync(pluginTemplate, 'utf8')
   .replace(/file:\/\/\/[^"'\r\n]*\/dsh-social-bridge-plugin\/([A-Za-z0-9_-]+\.mjs)(?:\?[^"'\r\n]*)?/g, 'dsh-social-bridge-plugin/$1'));
@@ -132,8 +137,8 @@ const fileList = [...new Set(files)].sort();
 const sourceHashes = Object.fromEntries(fileList.map(file => [file, sha(fs.readFileSync(path.join(project,file)))]));
 const desktopHashes = Object.fromEntries(fs.readdirSync(appDir).filter(file=>fs.statSync(path.join(appDir,file)).isFile()).sort().map(file=>[file,sha(fs.readFileSync(path.join(appDir,file)))]));
 const runtimeRevision = sha(Buffer.from(JSON.stringify({node:sha(fs.readFileSync(process.execPath)),python:fs.readFileSync(path.join(stage,'runtime/python/DEPENDENCIES.json'),'utf8')}))).slice(0,12);
-const buildId = sha(Buffer.from(JSON.stringify({sourceHashes,desktopHashes,runtimeRevision,hook:sha(fs.readFileSync(path.join(vendor,'hook/version.dll')))}))).slice(0,16);
-fs.writeFileSync(path.join(project, 'deployment.json'), JSON.stringify({ version, packageVersion, buildId, builtAt:new Date().toISOString(), runtimeRevision, sourceHashes, files:fileList, presets:presetNames.map(name=>name.slice(0,-3)), node:process.version, python:'3.13.16', dshBundled:false,dshSdkVersion:DSH_SDK_VERSION,dshInstallUrl:DSH_INSTALL_URL, privateAccountDataIncluded:false, authorization:'Maintainer confirmed redistribution authorization for all currently used components and requested all current role files as bundled presets on 2026-10-05.' }, null, 2));
+const buildId = sha(Buffer.from(JSON.stringify({sourceHashes,desktopHashes,runtimeRevision,hook:sha(fs.readFileSync(path.join(vendor,'hook/version.dll'))),currentHook:currentBuild?.sha256??null,currentLoader:currentBuild?.loaderSha256??null}))).slice(0,16);
+fs.writeFileSync(path.join(project, 'deployment.json'), JSON.stringify({ version, packageVersion, buildId, builtAt:new Date().toISOString(), runtimeRevision, wechatVersion, sourceHashes, files:fileList, presets:presetNames.map(name=>name.slice(0,-3)), node:process.version, python:'3.13.16', dshBundled:false,dshSdkVersion:DSH_SDK_VERSION,dshInstallUrl:DSH_INSTALL_URL, privateAccountDataIncluded:false, authorization:'Maintainer confirmed redistribution authorization for all currently used components and requested all current role files as bundled presets on 2026-10-05.' }, null, 2));
 // No personal data can enter the deployment template or vendor programs.
 for (const file of fs.readdirSync(project, { recursive:true })) {
   const relative = String(file).replaceAll('\\','/');

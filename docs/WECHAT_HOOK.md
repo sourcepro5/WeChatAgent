@@ -2,6 +2,8 @@
 
 源码发布副本提供本项目的版本、账号、令牌检查覆盖层与 OneBot 适配器，不包含第三方 Hook 源码、DLL、微信程序或安装包。
 
+**微信 4.1.15.13 x64** 另有本项目独立的原生 profile，见 [4.1.15.13 接入说明](WECHAT_4_1_15_13.md)。它采用显式装载，不复用下述旧版偏移或替换微信文件。v2 在原生 API 层增加后台图片和群聊真实 @；OneBot 仍沿用文字路径，新接口尚未接入其媒体／@ 分段发送。引用、动态表情和音视频发送不在此 profile 的支持范围。以下原有步骤仍用于 4.1.10.27。
+
 来源：[aixed/WeChat-Hook](https://github.com/aixed/WeChat-Hook)。当前匹配 Windows x64 微信 `4.1.10.27`，构建脚本要求的来源提交为 `e905d07ade50d2c6472e4eb3bd4f3fe19cf662c6`。维护者已确认当前使用组件的再分发授权；源码仓库仍将原始 Hook 和客户端作为外部组件，保留本项目覆盖层及来源记录。
 
 ## 本机准备
@@ -38,3 +40,8 @@ version.dll 的加载入口只安排初始化工作；核心模块 Weixin.dll �
 在运行日志查看 hook-init.log：waiting_for_weixin_dll 表示等待核心模块，weixin_dll_ready 表示模块已就绪，http_listening 表示端口已绑定，initialization_ready 表示初始化完成；module_wait_timeout 表示等待超时，http_bind_failed 表示端口无法绑定。日志不记录令牌、读取密钥或聊天内容。
 
 升级需从托盘完整退出匹配微信后再通过助手“打开微信”，以加载新的 DLL。
+
+
+## 按客户端隔离的保护与恢复
+
+当前保护同时支持 4.1.10.27 与 4.1.15.13，使用 `state/hook/client-pins/` 分别保存权限和更新器恢复记录。旧 `client-pin-acl.json` 保留兼容读取，新的保护状态以按目录隔离的记录为准。具体开启、解除及边界见[客户端保护说明](CLIENT_PROTECTION.md)。

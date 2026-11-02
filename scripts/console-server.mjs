@@ -401,6 +401,8 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
         assets['/dsh-install.mjs']=['dsh-install.mjs','text/javascript; charset=utf-8'];
         assets['/session-groups.js']=['session-groups.js','text/javascript; charset=utf-8'];assets['/session-groups.css']=['session-groups.css','text/css; charset=utf-8'];
         assets['/process-recovery.js']=['process-recovery.js','text/javascript; charset=utf-8'];assets['/process-recovery.css']=['process-recovery.css','text/css; charset=utf-8'];
+        assets['/motion.js']=['motion.js','text/javascript; charset=utf-8'];assets['/motion.css']=['motion.css','text/css; charset=utf-8'];
+        assets['/liquid-glass.js']=['liquid-glass.js','text/javascript; charset=utf-8'];assets['/liquid-glass.css']=['liquid-glass.css','text/css; charset=utf-8'];
         assets['/dsh-access.js']=['dsh-access.js','text/javascript; charset=utf-8'];assets['/extensions.js']=['extensions.js','text/javascript; charset=utf-8'];
         if (!assets[route]) return reply(404, { error: '页面不存在。' });
         const [file, type] = assets[route]; return reply(200, fs.readFileSync(path.join(publicDir, file)), type);

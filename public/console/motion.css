@@ -1,0 +1,258 @@
+/* ==========================================================================
+   WeChatAgent · Motion layer
+   纯增强层：只添加过渡与动画，不改变布局与业务结构。
+   console.css 已在 prefers-reduced-motion 下全局关闭 animation/transition，
+   本文件的全部效果会自动跟随系统"减少动态效果"设置。
+   ========================================================================== */
+
+@property --motion-angle{syntax:'<angle>';inherits:false;initial-value:0deg}
+@property --motion-spot{syntax:'<percentage>';inherits:false;initial-value:0%}
+
+:root{
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --ease-in:cubic-bezier(.55,0,.75,.2);
+  --ease-in-out:cubic-bezier(.65,0,.35,1);
+  --ease-spring:cubic-bezier(.34,1.56,.64,1);
+  --ease-bounce:linear(0,.22 6%,.66 16%,1.02 27%,1.1 33%,1.06 41%,.99 52%,1.01 66%,1);
+  --motion-glow:color-mix(in srgb,var(--accent) 22%,transparent);
+  --motion-glow-soft:color-mix(in srgb,var(--accent) 12%,transparent);
+  --motion-lift:0 14px 34px -16px color-mix(in srgb,var(--accent) 38%,transparent),0 3px 10px -4px #0000000f;
+  interpolate-size:allow-keywords;
+}
+
+/* ---------- 动态背景（极光） ---------- */
+.motion-ambient{position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;contain:strict}
+.motion-ambient>i{position:absolute;display:block;width:58vmax;height:58vmax;border-radius:50%;will-change:transform;animation:motion-drift 42s var(--ease-in-out) infinite alternate}
+.motion-ambient>i:nth-child(1){left:-14vmax;top:-22vmax;background:radial-gradient(circle,color-mix(in srgb,var(--accent) 15%,transparent),transparent 62%)}
+.motion-ambient>i:nth-child(2){right:-22vmax;top:18vh;background:radial-gradient(circle,color-mix(in srgb,var(--ok) 11%,transparent),transparent 60%);animation-duration:54s;animation-delay:-18s}
+.motion-ambient>i:nth-child(3){left:28vw;bottom:-36vmax;background:radial-gradient(circle,color-mix(in srgb,var(--warn) 7%,transparent),transparent 58%);animation-duration:64s;animation-delay:-31s}
+:root[data-theme=dark] .motion-ambient>i{opacity:.75}
+body.has-wallpaper .motion-ambient{display:none}
+@keyframes motion-drift{
+  0%{transform:translate3d(0,0,0) scale(1) rotate(0)}
+  50%{transform:translate3d(7vmax,5vmax,0) scale(1.14) rotate(25deg)}
+  100%{transform:translate3d(-5vmax,9vmax,0) scale(.92) rotate(-10deg)}
+}
+
+/* ---------- 首次进入：侧边栏级联 ---------- */
+.motion-boot .brand{animation:motion-slide-right .7s var(--ease-out) both}
+.motion-boot .sidebar nav a,.motion-boot .nav-caption{animation:motion-slide-right .6s var(--ease-out) both;animation-delay:calc(80ms + var(--motion-i,0) * 45ms)}
+.motion-boot .sidebar-bottom{animation:motion-fade-in .8s var(--ease-out) .45s both}
+.motion-boot .topbar{animation:motion-drop .6s var(--ease-out) both}
+@keyframes motion-slide-right{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}
+@keyframes motion-fade-in{from{opacity:0}to{opacity:1}}
+@keyframes motion-drop{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+
+/* ---------- 品牌 ---------- */
+.brand img{transition:transform .6s var(--ease-spring),filter .4s}
+.brand:hover img{transform:rotate(-12deg) scale(1.1);filter:drop-shadow(0 6px 10px var(--motion-glow))}
+
+/* ---------- 侧边导航：滑动指示器 ---------- */
+.sidebar nav{position:relative}
+.motion-nav-indicator{position:absolute;left:0;right:0;top:0;height:43px;border-radius:10px;background:var(--accent-soft);pointer-events:none;z-index:0;opacity:0;transform:translateY(var(--y,0));transition:opacity .25s}
+/* 位移与高度不用 CSS 过渡：过渡在层叠中优先级高于动画，会盖掉 motion.js 中 jelly() 的形变关键帧 */
+.motion-nav-indicator::before{content:'';position:absolute;left:0;top:50%;width:3px;height:18px;margin-top:-9px;border-radius:0 3px 3px 0;background:var(--accent);transform-origin:left center;animation:motion-bar-in .5s var(--ease-spring) both}
+.motion-nav-indicator.is-moving::before{animation:motion-bar-stretch .5s var(--ease-out)}
+@keyframes motion-bar-in{from{transform:scaleY(0)}to{transform:none}}
+@keyframes motion-bar-stretch{0%{transform:scaleY(1)}40%{transform:scaleY(1.9)}100%{transform:scaleY(1)}}
+.sidebar nav.has-indicator .motion-nav-indicator{opacity:1}
+.sidebar nav.has-indicator a{position:relative;z-index:1}
+.sidebar nav.has-indicator a[aria-current=page]{background:transparent}
+.sidebar nav a{transition:background .2s,color .2s}
+.sidebar nav a svg{transition:transform .45s var(--ease-spring)}
+.sidebar nav a:hover svg{transform:translateX(2px) scale(1.12)}
+.sidebar nav a[aria-current=page] svg{animation:motion-icon-pop .55s var(--ease-spring)}
+@keyframes motion-icon-pop{0%{transform:scale(.6) rotate(-14deg)}100%{transform:none}}
+.nav-count{transition:background .25s,color .25s}
+.nav-count.motion-bump{animation:motion-bump .5s var(--ease-spring)}
+@keyframes motion-bump{0%{transform:scale(1)}35%{transform:scale(1.35)}100%{transform:scale(1)}}
+
+/* ---------- 状态指示点：呼吸与涟漪 ---------- */
+.dot{position:relative;transition:background .4s}
+.dot.online::after,.dot.warning::after{content:'';position:absolute;inset:0;border-radius:50%;background:inherit;pointer-events:none}
+.dot.online::after{animation:motion-ping 2.5s var(--ease-out) infinite}
+.dot.warning::after{animation:motion-ping 1.25s var(--ease-out) infinite}
+.dot.failed{animation:motion-blink 1.25s ease-in-out infinite}
+@keyframes motion-ping{0%{transform:scale(1);opacity:.6}70%,100%{transform:scale(3);opacity:0}}
+@keyframes motion-blink{0%,100%{opacity:1}50%{opacity:.35}}
+.connection-label{transition:color .25s}
+.connection-label:hover{color:var(--text)}
+.connection-label span{display:inline-block}
+.connection-label.motion-changed span{animation:motion-text-swap .45s var(--ease-out)}
+@keyframes motion-text-swap{from{opacity:0;transform:translateY(5px);filter:blur(2px)}to{opacity:1;transform:none;filter:none}}
+
+/* ---------- 页面切换：标题与内容级联 ---------- */
+.motion-enter{animation:motion-rise .62s var(--ease-out) both;animation-delay:calc(var(--motion-i,0) * 55ms)}
+.motion-soft{animation:motion-soft .34s var(--ease-out) both}
+.page-heading.motion-enter h1{animation:motion-title .7s var(--ease-out) both}
+.page-heading.motion-enter p{animation:motion-title .7s var(--ease-out) .06s both}
+@keyframes motion-rise{from{opacity:0;transform:translateY(18px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes motion-soft{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes motion-title{from{opacity:0;transform:translateY(10px);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+
+/* ---------- 卡片：光斑跟随 + 悬停浮起 ---------- */
+.card,body.has-wallpaper .card{background-image:radial-gradient(560px circle at var(--mx,50%) var(--my,50%),color-mix(in srgb,var(--accent) var(--motion-spot),transparent),transparent 46%)}
+.card{transition:--motion-spot .45s var(--ease-out),border-color .35s var(--ease-out),box-shadow .45s var(--ease-out),transform .45s var(--ease-out)}
+.card:hover{--motion-spot:8%;border-color:color-mix(in srgb,var(--accent) 26%,var(--border))}
+:root[data-theme=dark] .card:hover{--motion-spot:11%}
+.metrics>.card:hover,.session-card:hover,.extension-card:hover,.sticker-card:hover,.speech-card:hover,.power-card:hover{transform:translateY(-3px);box-shadow:var(--motion-lift)}
+
+/* 概览：电源按钮 */
+.power-control{position:relative;transition:background .35s,color .35s,transform .45s var(--ease-spring),box-shadow .45s var(--ease-out)}
+.power-control:hover{transform:translateY(-2px) scale(1.05)}
+.power-control:active:not(:disabled){transform:scale(.92);transition-duration:.12s}
+.power-control svg{transition:transform .6s var(--ease-spring)}
+.power-control:hover svg{transform:rotate(90deg)}
+.power-control.active{animation:motion-breathe 3s ease-in-out infinite}
+.power-control.active:hover{background:var(--accent-hover)}
+@keyframes motion-breathe{
+  0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 38%,transparent),0 10px 24px -10px color-mix(in srgb,var(--accent) 70%,transparent)}
+  50%{box-shadow:0 0 0 12px color-mix(in srgb,var(--accent) 0%,transparent),0 16px 32px -10px color-mix(in srgb,var(--accent) 80%,transparent)}
+}
+.power-control::before{content:'';position:absolute;inset:-5px;border-radius:25px;padding:2px;background:conic-gradient(from var(--motion-angle),transparent 0 55%,var(--accent) 85%,transparent);-webkit-mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);opacity:0;transition:opacity .3s;pointer-events:none}
+.power-control:disabled::before{opacity:1;animation:motion-spin 1.1s linear infinite}
+@keyframes motion-spin{to{--motion-angle:360deg}}
+#power-title.motion-changed{animation:motion-text-swap .5s var(--ease-out)}
+
+/* 连接检查：节点与"数据流"连线 */
+.service-node{transition:transform .4s var(--ease-out),box-shadow .4s var(--ease-out),border-color .3s,background .3s}
+.service-node:hover{transform:translateY(-3px);box-shadow:var(--motion-lift);border-color:color-mix(in srgb,var(--accent) 30%,var(--border));background:var(--surface)}
+.service-node:not(:last-child)::after{border-top:0;height:2px;margin-top:-1px;border-radius:2px;background:linear-gradient(90deg,var(--border) 0 30%,var(--accent) 50%,var(--border) 70% 100%) 0 0/300% 100%;animation:motion-flow 2.5s linear infinite}
+@keyframes motion-flow{from{background-position:100% 0}to{background-position:-50% 0}}
+
+/* 指标数字 */
+.metric-value{font-variant-numeric:tabular-nums}
+.metric-label svg{transition:transform .5s var(--ease-spring),color .3s}
+.card:hover .metric-label svg{transform:scale(1.18) rotate(-8deg);color:var(--accent-text)}
+
+/* 最近记录 */
+.recent-row{transition:background .25s,transform .35s var(--ease-out);border-radius:10px}
+.recent-row:hover{transform:translateX(4px)}
+.recent-row .avatar{transition:transform .45s var(--ease-spring),background .3s}
+.recent-row:hover .avatar{transform:scale(1.1) rotate(-6deg)}
+.motion-new-row{animation:motion-new-row .7s var(--ease-out) both}
+@keyframes motion-new-row{0%{opacity:0;transform:translateY(-10px);background:var(--accent-soft)}60%{opacity:1;background:var(--accent-soft)}100%{transform:none;background:transparent}}
+
+/* ---------- 按钮：弹性按压 + 涟漪 ---------- */
+:where(.button,.icon-button,.mode-option,.role-item,.chat-picker-item,.segmented button,.workspace-tabs>a,.workspace-tabs>button,.sidebar nav a){position:relative}
+.button{transition:background .2s,border-color .2s,color .2s,box-shadow .3s var(--ease-out),transform .35s var(--ease-spring)}
+.button:hover:not(:disabled){transform:translateY(-1px)}
+.button:active:not(:disabled),.icon-button:active:not(:disabled){transform:scale(.95);transition-duration:.1s}
+.button.primary:hover:not(:disabled){box-shadow:0 8px 20px -8px color-mix(in srgb,var(--accent) 75%,transparent)}
+.button svg,.text-link svg{transition:transform .4s var(--ease-spring)}
+.button:hover svg{transform:scale(1.12)}
+.text-link:hover svg{transform:translateX(3px)}
+.icon-button{transition:background .2s,color .2s,transform .35s var(--ease-spring)}
+.icon-button svg{transition:transform .5s var(--ease-spring)}
+#refresh-button:hover:not(.is-refreshing) svg{transform:rotate(-80deg)}
+#theme-button:hover svg{transform:rotate(25deg) scale(1.1)}
+#modal-close:hover svg,#job-close:hover svg{transform:rotate(90deg)}
+.motion-ripple-host{position:absolute;inset:0;border-radius:inherit;overflow:hidden;pointer-events:none;z-index:0}
+.motion-ripple{position:absolute;width:var(--size);height:var(--size);left:var(--x);top:var(--y);margin:calc(var(--size) / -2) 0 0 calc(var(--size) / -2);border-radius:50%;background:currentColor;opacity:.16;transform:scale(0);animation:motion-ripple .65s var(--ease-out) forwards}
+@keyframes motion-ripple{to{transform:scale(1);opacity:0}}
+
+/* ---------- 选择类控件 ---------- */
+.mode-option,.role-item,.chat-picker-item,.contact-result{transition:background .25s,border-color .25s,box-shadow .35s var(--ease-out),transform .35s var(--ease-out)}
+.mode-option:hover,.role-item:hover{transform:translateY(-2px);box-shadow:0 10px 22px -16px color-mix(in srgb,var(--accent) 60%,transparent)}
+.mode-option:active,.role-item:active,.chat-picker-item:active{transform:scale(.98);transition-duration:.1s}
+.mode-option.selected,.role-item.selected,.chat-picker-item[aria-current=true]{animation:motion-select .5s var(--ease-spring)}
+@keyframes motion-select{0%{transform:scale(.965)}100%{transform:none}}
+.chat-picker-item:hover{background:var(--surface-2);transform:translateX(3px)}
+.chat-picker-item[aria-current=true]:hover{background:var(--accent-soft)}
+.contact-result:hover{background:var(--surface-2)}
+.segmented button{transition:background .25s,color .25s,box-shadow .3s,transform .3s var(--ease-spring)}
+.segmented button.selected{animation:motion-select .45s var(--ease-spring)}
+.workspace-tabs>a,.workspace-tabs>button{transition:background .25s,color .25s,border-color .25s,transform .3s var(--ease-spring)}
+.workspace-tabs>a:hover,.workspace-tabs>button:hover{color:var(--text);background:var(--surface-2)}
+.workspace-tabs>[aria-current=page],.workspace-tabs>[aria-pressed=true]{animation:motion-select .45s var(--ease-spring)}
+.workspace-tabs>[aria-current=page]:hover,.workspace-tabs>[aria-pressed=true]:hover{background:var(--accent-soft);color:var(--accent-text)}
+tbody tr{transition:background .2s}
+tbody tr:hover{background:var(--surface-2)}
+
+/* ---------- 开关：弹簧滑块 + 按压拉伸 ---------- */
+.switch-track{transition:background .35s var(--ease-out),box-shadow .3s}
+.switch-track::after{transition:transform .45s var(--ease-spring),width .25s var(--ease-out),background .3s}
+.switch-control:hover .switch-track{box-shadow:0 0 0 4px var(--motion-glow-soft)}
+.switch-control:active .switch-track::after{width:20px}
+.switch-control:active input:checked+.switch-track::after{transform:translateX(10px)}
+
+/* ---------- 输入框：聚焦光环 ---------- */
+input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{transition:border-color .2s,box-shadow .3s var(--ease-out),background .25s}
+input:not([type=checkbox]):not([type=radio]):not([type=range]):focus-visible,select:focus-visible,textarea:focus-visible{outline:none;border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 4px var(--motion-glow)}
+
+/* ---------- 加载与空状态 ---------- */
+.loading-state{background:linear-gradient(100deg,var(--muted) 0 40%,var(--accent-text) 50%,var(--muted) 60% 100%) 0 0/250% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:motion-shimmer 1.8s linear infinite}
+.loading-state::after{content:'';display:block;width:120px;height:3px;margin:16px auto 0;border-radius:3px;background:linear-gradient(90deg,transparent,var(--accent),transparent) 0 0/50% 100% no-repeat,var(--surface-3);animation:motion-loading-bar 1.3s var(--ease-in-out) infinite}
+@keyframes motion-shimmer{from{background-position:100% 0}to{background-position:-150% 0}}
+@keyframes motion-loading-bar{0%{background-position:-60% 0,0 0}100%{background-position:160% 0,0 0}}
+.empty-state>svg{animation:motion-float 3.6s ease-in-out infinite}
+@keyframes motion-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+
+/* ---------- 横幅提示 ---------- */
+.notice{animation:motion-notice .5s var(--ease-out) both}
+.notice>svg{animation:motion-wiggle 1.1s var(--ease-out) .3s both}
+@keyframes motion-notice{from{opacity:0;transform:translateY(-8px) scale(.98)}to{opacity:1;transform:none}}
+@keyframes motion-wiggle{0%,100%{transform:none}20%{transform:rotate(-14deg)}40%{transform:rotate(10deg)}60%{transform:rotate(-6deg)}80%{transform:rotate(3deg)}}
+
+/* ---------- 弹窗：弹簧缩放 + 模糊背景 ---------- */
+dialog{opacity:0;transform:translateY(14px) scale(.95);transition:opacity .2s var(--ease-in),transform .22s var(--ease-in),overlay .22s allow-discrete,display .22s allow-discrete}
+dialog[open]{opacity:1;transform:none;transition:opacity .3s var(--ease-out),transform .5s var(--ease-spring),overlay .5s allow-discrete,display .5s allow-discrete}
+@starting-style{dialog[open]{opacity:0;transform:translateY(14px) scale(.95)}}
+dialog::backdrop{background-color:transparent;-webkit-backdrop-filter:blur(0);backdrop-filter:blur(0);transition:background-color .25s,backdrop-filter .25s,-webkit-backdrop-filter .25s,overlay .25s allow-discrete,display .25s allow-discrete}
+dialog[open]::backdrop{background-color:var(--overlay);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+@starting-style{dialog[open]::backdrop{background-color:transparent;-webkit-backdrop-filter:blur(0);backdrop-filter:blur(0)}}
+#modal-content.motion-swap{animation:motion-soft .35s var(--ease-out)}
+
+/* ---------- 下拉菜单 ---------- */
+.action-menu>summary{transition:background .2s,border-color .2s,transform .35s var(--ease-spring)}
+.action-menu[open]>div{animation:motion-menu .32s var(--ease-out);transform-origin:top right}
+.action-menu[open]>div>*{animation:motion-soft .35s var(--ease-out) both}
+.action-menu[open]>div>:nth-child(2){animation-delay:.04s}
+.action-menu[open]>div>:nth-child(3){animation-delay:.08s}
+.action-menu[open]>div>:nth-child(4){animation-delay:.12s}
+@keyframes motion-menu{from{opacity:0;transform:translateY(-6px) scale(.94)}to{opacity:1;transform:none}}
+
+/* ---------- 折叠面板：平滑展开 ---------- */
+details:not(.action-menu)::details-content{block-size:0;overflow:hidden;opacity:0;transition:block-size .4s var(--ease-out),opacity .3s,content-visibility .4s allow-discrete}
+details:not(.action-menu)[open]::details-content{block-size:auto;opacity:1}
+summary{transition:color .2s}
+summary:hover{color:var(--text)}
+
+/* ---------- Toast：弹出 ---------- */
+.toast{opacity:1;transform:translate(-50%,0) scale(1);transition:opacity .3s var(--ease-out),transform .5s var(--ease-spring),display .3s allow-discrete}
+.toast[hidden]{opacity:0;transform:translate(-50%,18px) scale(.94);transition:opacity .22s var(--ease-in),transform .25s var(--ease-in),display .25s allow-discrete}
+@starting-style{.toast:not([hidden]){opacity:0;transform:translate(-50%,18px) scale(.94)}}
+.toast.motion-swap{animation:motion-toast-swap .4s var(--ease-spring)}
+@keyframes motion-toast-swap{0%{transform:translate(-50%,0) scale(.96)}100%{transform:translate(-50%,0) scale(1)}}
+
+/* ---------- 底部保存栏 ---------- */
+.save-bar{opacity:1;transform:none;transition:opacity .3s var(--ease-out),transform .55s var(--ease-spring),display .3s allow-discrete}
+.save-bar[hidden]{opacity:0;transform:translateY(calc(100% + 24px));transition:opacity .22s var(--ease-in),transform .28s var(--ease-in),display .28s allow-discrete}
+@starting-style{.save-bar:not([hidden]){opacity:0;transform:translateY(calc(100% + 24px))}}
+.save-bar:not([hidden]){animation:motion-border-glow 2.6s ease-in-out .6s infinite}
+@keyframes motion-border-glow{0%,100%{box-shadow:var(--shadow),0 0 0 0 var(--motion-glow)}50%{box-shadow:var(--shadow),0 0 0 5px transparent}}
+
+/* ---------- 操作进度面板 ---------- */
+.job-panel{opacity:1;transform:none;transition:opacity .3s var(--ease-out),transform .55s var(--ease-spring),display .3s allow-discrete}
+.job-panel[hidden]{opacity:0;transform:translate(24px,12px) scale(.96);transition:opacity .22s var(--ease-in),transform .26s var(--ease-in),display .26s allow-discrete}
+@starting-style{.job-panel:not([hidden]){opacity:0;transform:translate(24px,12px) scale(.96)}}
+.job-panel:has(#job-dot.warning) .job-header{background:linear-gradient(90deg,transparent,var(--motion-glow-soft),transparent) 0 0/200% 100%;animation:motion-shimmer 2.2s linear infinite}
+#job-title.motion-changed{animation:motion-text-swap .45s var(--ease-out)}
+
+/* 顶栏"更多"菜单中的主题按钮：横向排布，避免文字竖排 */
+.topbar-more #theme-button{width:auto;height:auto;min-height:42px;justify-content:flex-start;gap:10px;padding:0 12px;white-space:nowrap;font-size:12px;color:var(--text)}
+
+/* ---------- 状态标签 ---------- */
+.status-tag{transition:background .35s,color .35s}
+
+/* ---------- 主题切换：圆形扩散（View Transitions） ---------- */
+::view-transition-old(root),::view-transition-new(root){animation:none;mix-blend-mode:normal}
+::view-transition-new(root){z-index:2}
+::view-transition-old(root){z-index:1}
+
+@media(prefers-reduced-motion:reduce){
+  .motion-ambient{display:none}
+}
+@media(max-width:640px){
+  .motion-ambient>i{width:90vmax;height:90vmax}
+}
