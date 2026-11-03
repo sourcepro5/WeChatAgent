@@ -1,5 +1,6 @@
 import {sessionUsage} from './session-usage.js';
 import {consoleRoute,routeKey,SETTINGS_SECTIONS} from './layout-model.mjs';
+import {TIME_ZONE_PRESETS,DEFAULT_TIME_ZONE} from './time-zone-presets.mjs';
 import {createWorkspaceLayout} from './workspace-layout.js';
 import {createMemoryUI} from './memory-view.js';
 import {createFishNotebookUI} from './fish-notebook.js';
@@ -329,9 +330,36 @@ function newRole() {
 function contextSettingsCard() {
   return `<section class="card context-settings">${header('上下文上限与自动压缩', '每个聊天独立统计，达到阈值后等待空闲再压缩。', '', 'history')}${toggle('启用空闲时自动压缩', 'wechat.context.enabled', '只作用于允许的聊天中的好友和群聊；沿用同一个会话，保留原始记录。')}<div class="form-grid space-top">${field('默认上下文阈值 / token', 'wechat.context.maxTokens', {type:'number',min:4000,max:2000000,step:1,help:'默认 100,000。按 DSH 当前有效上下文统计；是压缩触发阈值，正在回复时可能暂时超过。'})}${field('聊天至少空闲 / 秒', 'wechat.context.idleSeconds', {type:'number',min:15,max:3600,step:1,help:'默认 60 秒。没有待回复消息、模型运行或发送任务时才压缩。'})}</div><p class="subtle space-top">可在允许的聊天为单个聊天修改阈值，留空继承全局，填 0 关闭。每 30 秒检查，保存后生效。压缩会调用一次摘要模型；失败后等待重试，同一段未变化的上下文最多尝试 3 次。</p></section>`;
 }
+function timeZoneSample(zone) {
+  const target = zone || DEFAULT_TIME_ZONE;
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('zh-CN', { timeZone: target, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23' }).formatToParts(new Date()).map(({ type, value }) => [type, value]));
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${parts.weekday}`;
+  } catch { return ''; }
+}
+function timeZoneField() {
+  const current = getPath(state.draft, 'wechat.time_zone') ?? '';
+  const known = new Set(TIME_ZONE_PRESETS.map(([value]) => value));
+  const supported = typeof Intl.supportedValuesOf === 'function' ? Intl.supportedValuesOf('timeZone') : [];
+  const groups = new Map();
+  for (const zone of supported) {
+    if (known.has(zone)) continue;
+    const [region, ...rest] = zone.split('/');
+    if (!rest.length) continue;
+    if (!groups.has(region)) groups.set(region, []);
+    groups.get(region).push([zone, rest.join('/').replaceAll('_', ' ')]);
+  }
+  const custom = current && !known.has(current) && !supported.includes(current)
+    ? `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)}（当前设置）</option>`
+    : '';
+  const options = custom + TIME_ZONE_PRESETS.map(([value, label]) => `<option value="${value}" ${current === value ? 'selected' : ''}>${label}${value ? ` · ${value}` : ''}</option>`).join('');
+  const grouped = [...groups].map(([region, zones]) => `<optgroup label="${region}">${zones.map(([zone, label]) => `<option value="${zone}" ${current === zone ? 'selected' : ''}>${label} · ${zone}</option>`).join('')}</optgroup>`).join('');
+  return `<div class="field full"><label for="field-time-zone">时区</label><select id="field-time-zone" data-path="wechat.time_zone">${options}${grouped}</select><small>决定提示词里的日期与时间按哪里算。留空按北京时间（原行为）。</small><p class="subtle space-top" id="time-zone-sample">提示词里会写成：${timeZoneSample(current)}（${current || '北京时间'}）</p></div>`;
+}
 function settingsCards() { return {
   participation:`<section class="card">${header('群聊参与', '默认方式，可在允许的聊天为每个群单独选择。', '', 'chat')}<div id="behavior-mode">${modeSelector()}</div><div class="form-grid space-top">${field('唤醒词', 'wechat.wake_words', { transform: 'lines', help: '每行一个。群里识别这些文字后进入回复判断。', placeholder: '小助手' })}${field('账号昵称提示', 'account.nicknames', { transform: 'lines', help: '每行一个。填写账号在聊天中使用的昵称。' })}</div><div class="notice plain">${icon('info')}<span>“自然参与”也会判断普通群消息，选择沉默时仍可能调用模型。拍一拍回应继续使用原有规则。</span></div></section>`,
   admins:`<section class="card">${header('助手模式管理员', '名单属于当前微信账号；仅用于助手模式，聊天模式保持原规则。', '', 'person')}${field('管理员真实微信 ID', 'wechat.assistant.administrators', {transform:'lines',help:'每行一位，最多 50 位。建议从微信好友中选择；昵称及“我是管理员”等聊天文字不能授予权限。保存后生效，名单为空时群友仍可聊天，但无人能执行任务；私聊助手仍仅允许管理员。',placeholder:'wxid_xxxxxxxxxxxxxx'})}<div class="button-row"><button class="button" id="choose-assistant-admin">${icon('plus')}从微信好友选择</button></div><p class="subtle space-top">群聊助手向所有群友开放聊天，工具、技能、文件、联网与任务控制仅允许指定管理员。普通聊天与管理员任务使用独立上下文；原生权限和审批仍然生效。</p></section>`,
+  timeZone:`<section class="card">${header('时间与时区', '提示词里的日期和时间按这里算，影响人格对“今天”“现在”的判断。', '', 'history')}<div class="form-grid">${timeZoneField()}</div><p class="subtle space-top">只改提示词里的时钟，不改系统时间，也不影响消息记录的时间戳。跨时区或夏令时切换后，模型看到的“今天”会自动跟着所选时区走。</p></section>`,
   rhythm:`<section class="card">${header('回复节奏', '控制消息合并、发送间隔与群聊频率。', '', 'sliders')}<div class="form-grid">${field('消息合并等待 / 秒', 'social.batch_ms', { type: 'number', transform: 'seconds', min: 0, max: 60, step: .1, help: '把短时间内收到的消息合并到同一轮判断。' })}${field('私聊回复最小间隔 / 秒', 'social.private_min_interval_ms', { type: 'number', transform: 'seconds', min: 0, max: 3600, step: .1 })}${field('群聊回复最小间隔 / 秒', 'social.min_interval_ms', { type: 'number', transform: 'seconds', min: 0, max: 3600, step: 1 })}${field('每分钟群回复上限 / 条', 'social.max_per_minute', { type: 'number', min: 1, max: 1000, step: 1 })}${field('每十分钟群回复上限 / 条', 'social.max_per_ten_minutes', { type: 'number', min: 1, max: 10000, step: 1 })}</div></section>`,
   proactive:`<section class="card">${header('按人设主动聊天', '让当前人格自然找话题或问候，不强迫每次开口。', '', 'chat')}${toggle('启用定时主动聊天', 'wechat.proactive.enabled', '总开关。还需在允许的聊天中逐个开启好友或群聊，默认不向任何聊天主动发送。')}${toggle('允许使用热点与新梗资料', 'wechat.proactive.useSearch', '仅在联网搜索对该聊天也开启时生效。资料不适合人设或无法取得时，改为问候或沉默。')}<div class="form-grid space-top"><div class="field full"><label for="field-proactive-mode">主动内容方向</label><select id="field-proactive-mode" data-path="wechat.proactive.mode">${[['mixed','问候、热点、新梗轮换'],['greeting','问候与生活关心'],['news','人设适合的实时热点'],['meme','人设适合的新梗 / meme']].map(([value,label])=>`<option value="${value}" ${getPath(state.draft,'wechat.proactive.mode')===value?'selected':''}>${label}</option>`).join('')}</select></div>${field('主动机会间隔 / 分钟','wechat.proactive.intervalMinutes',{type:'number',min:30,max:1440,step:1,help:'默认 240 分钟。启用后等待一个间隔，再开始考虑；模型可选择沉默。'})}${field('聊天至少安静 / 分钟','wechat.proactive.idleMinutes',{type:'number',min:5,max:1440,step:1,help:'默认 120 分钟。有新消息、待回复或正在发言时让路。'})}${field('允许开始时间 / 北京时间','wechat.proactive.startTime',{type:'time'})}${field('允许结束时间 / 北京时间','wechat.proactive.endTime',{type:'time'})}${field('随机延迟上限 / 分钟','wechat.proactive.jitterMinutes',{type:'number',min:0,max:60,step:1,help:'在间隔上增加少量随机延迟，使问候不总卡在同一时刻。'})}</div><p class="subtle">保存后一分钟内应用。沿用每个聊天当前的人设、关系和上下文；热点与梗不合适就不讲。避免重复话题和催促回复，好友明确要求不被主动打扰时暂停，直到其再次主动聊天。重启不会补发过期草稿。每个符合条件的主动机会可能调用一次模型，选择沉默也会产生模型消耗。</p></section>`,
   reader:`<section class="card">${header('网页阅读', '模型默认具备网页阅读能力，无需导入或配置密钥。', '', 'search')}${toggle('网页阅读', 'wechat.webReader.enabled', '默认开启。发来公开链接并要求阅读、总结或分析时，模型会读取实际正文；独立于联网搜索开关，保存后生效。')}<p class="subtle">例如：总结这个网页：https://example.com 。每轮最多三页，每页最多 12,000 字符；需要登录、验证码或执行 JavaScript 的页面可能无法读取。网页资料会提交给当前模型，工具调用与后续总结会产生模型消耗。</p></section>`,
@@ -598,6 +626,11 @@ async function load() {
   if(!state.updateUIStarted){state.updateUIStarted=true;startUpdateUI({api,toast});}
 }
 document.addEventListener('submit',event=>{if(event.target.id==='chat-filter-form'){event.preventDefault();state.chatQuery=$('#chat-search-query').value;state.chatModeFilter=$('#chat-mode-filter').value;renderPage();}});
+document.addEventListener('change', event => {
+  if (event.target.id !== 'field-time-zone') return;
+  const sample = $('#time-zone-sample');
+  if (sample) sample.textContent = `提示词里会写成：${timeZoneSample(event.target.value)}（${event.target.value || '北京时间'}）`;
+});
 document.addEventListener('change',event=>{if(event.target.id==='chat-mode-filter'){state.chatModeFilter=event.target.value;state.chatQuery=$('#chat-search-query').value;renderPage();}});
 document.addEventListener('input', event => {
   const input = event.target;

@@ -31,6 +31,7 @@
       "private": []
     },
     "wake_mode": "hybrid",
+    "time_zone": "",
     "wake_words": [
       "小助手"
     ],
