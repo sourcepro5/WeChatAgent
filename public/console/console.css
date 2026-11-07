@@ -42,3 +42,35 @@
 /* DSH plugin provenance uses the existing light/dark semantic palette. */
 .capability-section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:22px 0 8px}.capability-section-heading h3{font-size:14px}.capability-section-heading>span{font-size:12px;color:var(--muted)}.capability-source legend{max-width:100%;flex-wrap:wrap;font-size:13px}.capability-source [data-group-count]{font-size:11px;color:var(--muted)}.capability-package{font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:2px 0 8px}.capability-source-description{font-size:12px;line-height:1.7;color:var(--muted);margin-bottom:8px}.capability-source .capability-copy strong{font:12px/1.6 var(--mono)}.capability-source .capability-copy small{font-size:12px;line-height:1.7}.capability-source .dsh-option{min-height:44px}.capability-inventory{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-top:18px}.capability-inventory>summary{cursor:pointer;font-size:12px;min-height:28px;line-height:28px}.capability-inventory>p{margin-top:12px}.capability-plugin-info{padding:12px 0;border-top:1px solid var(--border)}.capability-plugin-info>div{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}.capability-plugin-info strong{font-size:13px;overflow-wrap:anywhere}.capability-plugin-info>small{display:block;margin-top:6px;overflow-wrap:anywhere;font-size:11px;color:var(--muted)}.capability-plugin-info>p{margin-top:8px}.capability-inventory summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px}@media(max-width:640px){.capability-source{padding:12px}.capability-source legend{font-size:12px}.capability-section-heading{margin-top:18px}}
 .capability-fold{padding:0}.capability-fold>summary{cursor:pointer;padding:12px 14px;font-size:13px;font-weight:600;line-height:1.8;overflow-wrap:anywhere}.capability-fold>summary>span{margin-left:8px}.capability-fold>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}.capability-fold>div{padding:0 14px 12px}.capability-fold:not([open])>summary{min-height:44px}
+/* ---------- 可读性与信息层级 ---------- */
+/* 说明类文字最小 12px（原 10–11px）；超过两行的说明由 console.js 收起，可展开 */
+.field small,.switch-row p,.card-description,.scope-note,.tool-row p,.modal-description,.notice{font-size:12px}
+.help-clamped{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.help-more{align-self:flex-start;font-size:12px;margin-top:2px}
+.switch-row .help-more{display:block}
+/* 保存后需重启服务才生效的设置 */
+.restart-tag{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:500;line-height:1.6;color:var(--warn);background:var(--warn-soft);vertical-align:1px;white-space:nowrap}
+/* 设置标签页中"维护"一组的分隔 */
+.workspace-tabs-group{display:inline-flex;align-items:center;margin-left:8px;padding-left:12px;border-left:1px solid var(--border);font-size:11px;color:var(--muted);letter-spacing:.08em;align-self:stretch}
+/* 人格编辑器大纲 */
+.role-outline{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 10px}
+.role-outline-item{border:1px solid var(--border);background:var(--surface-2);color:var(--text);border-radius:999px;padding:4px 10px;font-size:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.role-outline-item.level-1{font-weight:600}
+.role-outline-item.level-3,.role-outline-item.level-4{color:var(--muted)}
+.role-outline-item:hover{border-color:var(--accent);color:var(--accent-text)}
+/* ---------- 会话用量（历史与用量） ---------- */
+.session-usage{border-top:1px solid var(--border);padding-top:14px;margin-top:14px}
+.session-usage-rates{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.session-usage-rates>div,.usage-stat{padding:12px 14px;border:1px solid var(--lg-line-soft,var(--border));border-radius:12px;background:var(--lg-fill,var(--surface-2))}
+.session-usage-rates span,.usage-stat span{display:block;font-size:12px;color:var(--muted)}
+.session-usage-rates strong,.usage-stat strong{display:block;font-size:22px;font-variant-numeric:tabular-nums;margin:4px 0}
+.usage-stat small{display:block;font-size:12px;color:var(--muted)}
+.usage-meter{display:block;width:100%;height:6px;margin-top:10px;border:0;border-radius:999px;overflow:hidden;background:var(--surface-3);appearance:none;-webkit-appearance:none}
+.usage-meter::-webkit-progress-bar{background:var(--surface-3);border-radius:999px}
+.usage-meter::-webkit-progress-value{background:var(--accent);border-radius:999px}
+.usage-meter::-moz-progress-bar{background:var(--accent)}
+.chat-context .button-row{margin-top:12px}
+.session-usage-latest{font-size:13px;line-height:1.7;margin-top:12px}
+.session-usage p{overflow-wrap:anywhere}
+.usage-notes{margin-top:8px;font-size:12px;color:var(--muted)}
+.usage-notes p{margin-top:6px;line-height:1.7}

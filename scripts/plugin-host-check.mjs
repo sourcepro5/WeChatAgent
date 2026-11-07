@@ -8,7 +8,7 @@ const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const requiredIntegration=[
   'packages/dsh-social-bridge-plugin/native-context.mjs', 'scripts/project-config.mjs',
   'scripts/console-server.mjs', 'public/console/plugins.js', 'public/console/plugin-contract.mjs',
-  'scripts/speech-plugin-console.mjs','public/console/speech-settings.mjs',
+  'scripts/plugin-ui.mjs','scripts/plugin-settings-actions.mjs','scripts/voice-host-status.mjs','public/console/plugin-frame.mjs',
 ];
 function runtimeModules(folder,prefix='packages/plugin-api'){
   return fs.readdirSync(folder,{withFileTypes:true}).flatMap(entry=>entry.isSymbolicLink()?[]:entry.isDirectory()?runtimeModules(path.join(folder,entry.name),prefix+'/'+entry.name):entry.name.endsWith('.mjs')?[prefix+'/'+entry.name]:[]);

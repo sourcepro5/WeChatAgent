@@ -103,3 +103,27 @@ try{
  const exit=await runConsoleCommand({exe:windowsPowerShellExecutable(),args:['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',probe,'-Helper',path.join(root,'scripts/pin-hook-client.ps1'),'-TestRoot',path.join(temporary,'project')]},chunk=>output+=chunk,{timeoutMs:60000});
  assert.equal(exit,0,output);assert.match(output,/protection lifecycle regression passed/);
 });
+
+test('service start applies the default client protection first and never blocks on it',{skip:process.platform!=='win32'},async t=>{
+ const manage=fs.readFileSync(path.join(root,'scripts/manage.ps1'),'utf8').replace(/\r\n/g,'\n');
+ const marker=manage.indexOf('# Default client protection');
+ assert(marker>0,'manage.ps1 must apply default client protection');
+ const begin=manage.lastIndexOf('\nif (',marker)+1,end=manage.indexOf('\n}\n',marker)+3;
+ const block=manage.slice(begin,end);
+ assert.match(block,/pin-hook-client\.ps1/);
+ assert(begin>manage.indexOf("if ($Action -eq 'status')"),'status and prepare must stay read-only');
+ assert(end<manage.indexOf("Start-ServiceProcess 'reader'"),'protection must run before any service starts');
+ const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-start-pin-'));
+ t.after(()=>{assert(temporary.startsWith(os.tmpdir()+path.sep));fs.rmSync(temporary,{recursive:true,force:true,maxRetries:3});});
+ fs.mkdirSync(path.join(temporary,'scripts'));
+ fs.writeFileSync(path.join(temporary,'scripts/pin-hook-client.ps1'),"if($env:PIN_MODE -eq 'ok'){Write-Output 'PINNED';return}\nif($env:PIN_MODE -eq 'scope'){throw 'CLIENT_PIN_SCOPE_REQUIRED: fixture'}\nthrow 'CLIENT_PIN_UPDATER_RUNNING: fixture'\n");
+ const runner=path.join(temporary,'scripts/start-block.ps1');
+ fs.writeFileSync(runner,"$ErrorActionPreference='Stop'\n$config=[pscustomobject]@{runtime=[pscustomobject]@{sender='wechat-hook'}}\n$hookSender=$true\n"+block+"Write-Output 'START_CONTINUED'\n");
+ for(const [mode,expected] of [['ok',/PINNED/],['scope',/Client protection skipped/],['fail',/Client protection not applied: CLIENT_PIN_UPDATER_RUNNING/]]){
+  let output='';
+  const exit=await runConsoleCommand({exe:windowsPowerShellExecutable(),args:['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',runner]},chunk=>{output+=chunk;},{cwd:temporary,env:{...process.env,PIN_MODE:mode},timeoutMs:60000});
+  assert.equal(exit,0,mode+': '+output);
+  assert.match(output,expected,mode+': '+output);
+  assert.match(output,/START_CONTINUED/,mode+': '+output);
+ }
+});

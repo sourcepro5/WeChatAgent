@@ -22,7 +22,7 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 
 ## 能做什么
 
-- **人格聊天**：为好友和群聊绑定人格，独立保留上下文，支持图片与表情理解、原生表情发送。
+- **人格聊天**：为好友和群聊绑定人格，独立保留上下文，支持图片与表情理解；发送能力依所选微信适配版本而定。
 - **远程助手**：通过微信交办任务，使用当前聊天已授权的 DSH 工具与技能。
 - **能力扩展**：按需启用联网搜索、公开网页阅读和 ZIP 插件，为指定聊天配置能力与权限。
 
@@ -40,6 +40,8 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 
 当前兼容版本和安装范围见
 [安装说明](docs/INSTALLER_RELEASE.md)。
+
+**0.4.3 安装包只包含微信 4.2.0.12 x64**，全新安装默认使用此版本；升级保留原客户端选择和数据。已完成冷启动登录及文件传输助手文字、普通图片回执验收。4.2 已接通原生 GIF 表情发送及服务器回执，保留动画；暂不支持普通文件和引用发送。图片与真实 @ 的底层 API 不代表已提供完整模型工具链路。详见 [4.2 适配范围](docs/WECHAT_4_2_0_12.md)。
 
 ## 快速开始
 
@@ -131,8 +133,8 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 
 | 插件 | 下载 ZIP | 使用说明 |
 | --- | --- | --- |
-| 语音识别 API | [speech-recognition-1.2.0.zip](https://github.com/sourcepro5/WeChatAgent/raw/refs/heads/main/optional-extensions/packages/speech-recognition-1.2.0.zip) | [API 配置与语音转写](docs/VOICE_INPUT.md) |
-| 鱼的记事本 | [fish-notebook-1.0.0.zip](https://github.com/sourcepro5/WeChatAgent/raw/refs/heads/main/optional-extensions/packages/fish-notebook-1.0.0.zip) | [记事本插件说明](docs/FISH_NOTEBOOK.md) |
+| 语音识别 API | [speech-recognition-1.5.0.zip](https://github.com/sourcepro5/WeChatAgent/raw/refs/heads/main/optional-extensions/packages/speech-recognition-1.5.0.zip) | [API 配置与语音转写](docs/VOICE_INPUT.md) |
+| 鱼的记事本 | [fish-notebook-1.1.1.zip](https://github.com/sourcepro5/WeChatAgent/raw/refs/heads/main/optional-extensions/packages/fish-notebook-1.1.1.zip) | [记事本插件说明](docs/FISH_NOTEBOOK.md) |
 
 每个 ZIP 都附有同名的 `.sha256` 校验文件，位于同一目录。安装时直接导入 ZIP，无需解压。
 

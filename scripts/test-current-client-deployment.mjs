@@ -27,6 +27,7 @@ test('0.4.2 deploys the exact current client and external native resources witho
  const config=JSON.parse(fs.readFileSync(path.join(context.root,'config/wechatagent.json')));
  assert.equal(config.hook.expectedVersion,'4.1.15.13');assert.equal(config.hook.wechatExecutable,'state/hook/wechat-4.1.15.13/Weixin.exe');
  assert.deepEqual(config.wechat.whitelist,{private:[],groups:[]});
+ assert(!fs.existsSync(path.join(context.root,'state/hook/native')));
  assert.equal(fs.readFileSync(path.join(context.root,config.hook.wechatExecutable),'utf8'),'fixture-client');
  assert.equal(fs.readFileSync(path.join(context.root,'state/hook/native-4.1.15.13/wechatagent-text-loader.exe'),'utf8'),'fixture-current-loader');
  assert(!fs.existsSync(path.join(context.root,'state/hook/native-token.txt')));
@@ -58,4 +59,38 @@ test('packaging checks both current native resources and the exact capability pr
  f.write('vendor/hook-current/wechatagent-text-4.1.15.13.dll','fixture-current-dll');f.build.profile='unknown';f.write('vendor/hook-current/build.json',JSON.stringify(f.build));
  assert.throws(()=>verifyHookBuild(directory,'4.1.15.13'),/profile mismatch/);
  assert.throws(()=>verifyHookBuild(directory,'4.1.15.56'),/Unsupported/);
+});
+
+
+function current42(t){
+ const f=fixture(t);
+ for(const relative of ['vendor/hook','vendor/wechat/4.1.15.13']){const target=path.resolve(f.resources,relative);assert(target.startsWith(path.resolve(f.resources)+path.sep));fs.rmSync(target,{recursive:true,force:true});}
+ f.manifest.wechatVersion='4.2.0.12';f.manifest.bundledWechatVersions=['4.2.0.12'];f.write('project/deployment.json',JSON.stringify(f.manifest));
+ f.write('vendor/wechat/4.2.0.12/Weixin.dll','fixture-4.2-core');
+ const build={...f.build,targetVersion:'4.2.0.12',profile:'4.2.0.12-stickers-v2',productionEnabled:true,runtimeVerified:true,nativeStickerSend:true,acceptance:{coldStart:true,textReceipt:true,imageReceipt:true,stickerReceipt:true,animatedSticker:true}};
+ f.write('vendor/hook-current/build.json',JSON.stringify(build));f.write('vendor/hook-current/wechatagent-text-4.2.0.12.dll','fixture-current-dll');
+ const previous=path.resolve(f.resources,'vendor/hook-current/wechatagent-text-4.1.15.13.dll');assert(previous.startsWith(path.resolve(f.resources)+path.sep));fs.rmSync(previous);
+ return {...f,build};
+}
+test('a 4.2-only package deploys without any legacy client or legacy sender payload',async t=>{
+ const f=current42(t);assert.equal(verifyHookBuild(path.join(f.resources,'vendor/hook-current'),'4.2.0.12').targetVersion,'4.2.0.12');
+ const installed=await deployment.bootstrapDeployment(f.resources,f.home),config=JSON.parse(fs.readFileSync(path.join(installed.root,'config/wechatagent.json'),'utf8'));
+ assert.equal(config.hook.expectedVersion,'4.2.0.12');assert.equal(config.hook.wechatExecutable,'state/hook/wechat-4.2.0.12/Weixin.exe');
+ for(const old of ['native','native-4.1.15.13','wechat-4.1.10.27','wechat-4.1.15.13'])assert(!fs.existsSync(path.join(installed.root,'state/hook',old)));
+ assert(fs.existsSync(path.join(installed.root,'state/hook/native-4.2.0.12/wechatagent-text-4.2.0.12.dll')));
+});
+test('4.2 packaging and deployment reject missing runtime acceptance and mixed bundled versions',async t=>{
+ const f=current42(t);f.build.acceptance.coldStart=false;f.write('vendor/hook-current/build.json',JSON.stringify(f.build));
+ assert.throws(()=>verifyHookBuild(path.join(f.resources,'vendor/hook-current'),'4.2.0.12'),/acceptance/);await assert.rejects(()=>deployment.bootstrapDeployment(f.resources,f.home),/运行验收/);
+ f.build.acceptance.coldStart=true;f.write('vendor/hook-current/build.json',JSON.stringify(f.build));f.manifest.bundledWechatVersions.push('4.1.15.13');f.write('project/deployment.json',JSON.stringify(f.manifest));
+ await assert.rejects(()=>deployment.bootstrapDeployment(f.resources,f.home),/其他微信版本/);
+});
+
+test('4.2 cannot ship text-only or unverified animated-sticker payloads',async t=>{
+ for(const field of ['nativeStickerSend','stickerReceipt','animatedSticker']){
+  const f=current42(t);if(field==='nativeStickerSend')f.build[field]=false;else f.build.acceptance[field]=false;
+  f.write('vendor/hook-current/build.json',JSON.stringify(f.build));
+  assert.throws(()=>verifyHookBuild(path.join(f.resources,'vendor/hook-current'),'4.2.0.12'),/profile mismatch|acceptance/);
+  await assert.rejects(()=>deployment.bootstrapDeployment(f.resources,f.home),/运行验收/);
+ }
 });

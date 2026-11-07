@@ -185,6 +185,16 @@ if ($Action -eq 'prepare') { exit 0 }
 if ($Action -eq 'status') { Show-Status $config; exit 0 }
 if ($Action -eq 'restart') { Stop-Services }
 $python = (Get-Command $config.runtime.python -ErrorAction Stop).Source
+if ($hookSender) {
+    # Default client protection, also for a client opened outside WeChatAgent or
+    # unlocked earlier. Idempotent; never blocks starting the services.
+    try { & (Join-Path $PSScriptRoot 'pin-hook-client.ps1') }
+    catch {
+        $reason = $_.Exception.Message
+        if ($reason -like 'CLIENT_PIN_SCOPE_REQUIRED*') { Write-Output 'Client protection skipped: the selected WeChat is not an independent client below state/hook.' }
+        else { Write-Warning ('Client protection not applied: '+$reason) }
+    }
+}
 $weflowRoot = Join-Path $root 'components\WeFlowComplete'
 $electron = Join-Path $weflowRoot 'node_modules\electron\dist\electron.exe'
 $externalWeFlow = $config.runtime.weflowMode -eq 'existing'

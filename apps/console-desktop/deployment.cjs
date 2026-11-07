@@ -10,7 +10,8 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
   if (!fs.existsSync(manifestFile)) return null;
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
   const wechatVersion=manifest.wechatVersion??'4.1.10.27';
-  if(!['4.1.10.27','4.1.15.13'].includes(wechatVersion))throw new Error('发行包微信版本无效。');
+  if(!['4.1.10.27','4.1.15.13','4.2.0.12'].includes(wechatVersion))throw new Error('发行包微信版本无效。');
+  if(manifest.bundledWechatVersions&&(manifest.bundledWechatVersions.length!==1||manifest.bundledWechatVersions[0]!==wechatVersion))throw new Error('发行包包含其他微信版本。');
   const dshBundled = manifest.dshBundled !== false;
   const workspace = path.join(dataHome, 'workspace');
   const previousDistribution=path.join(workspace,'config/distribution.json');
@@ -56,6 +57,7 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
     progress('正在准备独立匹配微信…');
     fs.mkdirSync(path.dirname(client), { recursive: true }); await fs.promises.cp(path.join(resourcesPath, 'vendor', 'wechat'), client, { recursive: true });
   }
+  if(wechatVersion==='4.1.10.27'){
   const nativeDir = path.join(workspace, 'state', 'hook', 'native');
   fs.mkdirSync(nativeDir, { recursive: true });
   const previousBuild = path.join(nativeDir,'build.json');
@@ -72,11 +74,13 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
     const bytes = fs.readFileSync(source);
     if (!fs.existsSync(target) || crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex') !== crypto.createHash('sha256').update(bytes).digest('hex')) fs.writeFileSync(target,bytes);
   }
-  if(wechatVersion==='4.1.15.13'){
+  }
+  if(['4.1.15.13','4.2.0.12'].includes(wechatVersion)){
     const sourceDir=path.join(resourcesPath,'vendor','hook-current');
     const currentBuild=JSON.parse(fs.readFileSync(path.join(sourceDir,'build.json'),'utf8').replace(/^\uFEFF/,''));
-    if(currentBuild.targetVersion!==wechatVersion||currentBuild.integration!=='WeChatAgent-1'||currentBuild.profile!=='4.1.15.13-media-mentions-v2')throw new Error('发行包新版微信组件版本无效。');
-    const payloads=[['wechatagent-text-4.1.15.13.dll',currentBuild.sha256],['wechatagent-text-loader.exe',currentBuild.loaderSha256]].map(([file,expected])=>{
+    if(currentBuild.targetVersion!==wechatVersion||currentBuild.integration!=='WeChatAgent-1'||currentBuild.profile!==(wechatVersion==='4.2.0.12'?'4.2.0.12-stickers-v2':'4.1.15.13-media-mentions-v2'))throw new Error('发行包新版微信组件版本无效。');
+    if(wechatVersion==='4.2.0.12'&&(currentBuild.productionEnabled!==true||currentBuild.runtimeVerified!==true||currentBuild.acceptance?.coldStart!==true||currentBuild.acceptance?.textReceipt!==true||currentBuild.acceptance?.imageReceipt!==true||currentBuild.nativeStickerSend!==true||currentBuild.acceptance?.stickerReceipt!==true||currentBuild.acceptance?.animatedSticker!==true))throw new Error('发行包 4.2 组件尚未通过运行验收。');
+    const payloads=[['wechatagent-text-'+wechatVersion+'.dll',currentBuild.sha256],['wechatagent-text-loader.exe',currentBuild.loaderSha256]].map(([file,expected])=>{
       const bytes=fs.readFileSync(path.join(sourceDir,file));
       if(crypto.createHash('sha256').update(bytes).digest('hex')!==expected)throw new Error('发行包新版微信组件校验失败。');
       return [file,bytes];

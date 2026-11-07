@@ -10,7 +10,6 @@ import {packZip,unpackZip} from '../packages/plugin-api/zip.mjs';
 import {PluginDocuments} from '../packages/plugin-api/documents.mjs';
 import {FishNotebookStore} from '../packages/dsh-social-bridge-plugin/fish-notebook-store.mjs';
 import {notebookHash} from '../packages/dsh-social-bridge-plugin/fish-notebook-policy.mjs';
-import {fishNotebookSnapshot} from './fish-notebook-console.mjs';
 import {createConsole} from './console-server.mjs';
 const source=path.resolve('optional-extensions/fish-notebook'),account='a'.repeat(64),viewer='b'.repeat(64),other='c'.repeat(64),chat='wechat:private:123',group='wechat:group:456';
 const diary='今天和朋友聊了论文，也记下了一点小小的开心。\n\n鱼把这一页夹好，留给明天的自己慢慢看。';
@@ -29,7 +28,7 @@ async function fixture(t,{install=true,...options}={}){
 }
 
 test('the ZIP is self-contained and the old built-in switch does not run it before explicit installation and grants',async t=>{
-  const files=unpackZip(packZip(packageFiles(source)));assert.deepEqual(files.map(file=>file.name).sort(),['README.md','index.mjs','lib/notebook.mjs','plugin.json']);
+  const files=unpackZip(packZip(packageFiles(source)));assert.deepEqual(files.map(file=>file.name).sort(),['README.md','index.mjs','lib/notebook.mjs','plugin.json','ui.json','ui/page.html','ui/page.js','ui/style.css']);
   const f=await fixture(t);assert.equal(configuration(f.root).config.plugins['fish-notebook'].enabled,false);assert.equal(pluginEnabled(f.root,'fish-notebook',chat),false);
   assert.deepEqual(await f.ask(question(1)),{handled:false});await f.runtime.tick();assert.equal(f.calls.length,0);
   f.enable();await f.runtime.sync();assert.equal(pluginEnabled(f.root,'fish-notebook',chat),true);assert(f.runtime.records.get('fish-notebook').process.scheduled);assert.equal(f.runtime.toolDefinitions(chat).length,0);
@@ -40,7 +39,7 @@ test('installed plugin writes once, hides the first two requests and shares the 
   const first=await f.ask(question(1));assert(first.handled);assert(!first.document);assert(!first.text.includes(diary));assert.deepEqual(await f.ask(question(1)),first);
   const second=await f.ask(question(2));assert(!second.text.includes(diary));const third=await f.ask(question(3));assert(third.document);assert(third.text.endsWith(diary));assert.equal(f.calls.length,3);
   assert(!f.calls[1].prompt.includes('PRIVATE_TODAY_FACT'));assert(!f.calls[1].prompt.includes(diary));
-  const view=fishNotebookSnapshot(f.root,{config:f.config,revision:'r'});assert(view.installed);assert(view.effectiveEnabled);assert.equal(view.entries[0].text,diary);assert(!JSON.stringify(view.entries).includes('visitors'));
+  const view=await f.runtime.invokeAction('fish-notebook','list',{},{conversationKey:chat});assert.equal(view.total,1);assert.equal(view.entries[0].text,diary);assert(!JSON.stringify(view).includes('visitors'));assert.equal(f.calls.length,3);
   await f.runtime.dispose();const restored=new PluginRuntime({root:f.root,accountScope:account,personaFor:()=>({personaName:'示例小鱼',persona:'你是一条爱吐泡泡的小鱼。'}),now:()=>Date.parse('2026-10-25T12:00:00Z'),generateText:()=>{throw Error('NO_NEW_MODEL_CALL');}});t.after(()=>restored.dispose());await restored.sync();
   const again=await restored.invokeAction('fish-notebook','ask',question(4).args,{conversationKey:chat},{requireReply:true});assert.equal(again.text,third.text);
 });
@@ -87,10 +86,17 @@ test('the scoped model utility uses no tools and strips reasoning without alteri
   assert.equal(await generate({pluginId:'fish-notebook',key:chat,prompt:'write',maxChars:1000,signal:new AbortController().signal,allowed:()=>true}),diary);assert.deepEqual(calls[0].tools,[]);assert.equal(calls[0].reasoningEffort,'off');assert.equal(usage[0].purpose,'plugin:fish-notebook');
 });
 
-test('the UI download is an installable ZIP and the retired built-in settings endpoint cannot silently grant permissions',async t=>{
-  const f=await fixture(t,{install:false}),app=createConsole({root:f.root,port:0,fetchImpl:async()=>{throw Error('offline');}}),address=await app.start();t.after(()=>app.close());const base='http://127.0.0.1:'+address.port,info=await fetch(base+'/api/info').then(r=>r.json()),headers={'X-Console-Token':info.token,'Content-Type':'application/json'};
-  const response=await fetch(base+'/plugin-packages/fish-notebook.zip');assert.equal(response.status,200);assert.match(response.headers.get('content-disposition'),/fish-notebook-1.0.0.zip/);const files=unpackZip(Buffer.from(await response.arrayBuffer()));assert(files.some(file=>file.name==='lib/notebook.mjs'));
-  const old=await fetch(base+'/api/fish-notebook/settings',{method:'POST',headers,body:JSON.stringify({scope:account,key:chat,enabled:true,writeTime:'21:30'})});assert.equal(old.status,410);assert.equal(fs.existsSync(path.join(f.root,'config/plugins.json')),false);
+test('the package page lists diaries through its own action without counting a visit; host-specific notebook routes are gone',async t=>{
+  const f=await fixture(t);f.enable();await f.runtime.sync();
+  const written=await f.runtime.invokeAction('fish-notebook','write-today',{},{conversationKey:chat});assert.equal(written.entry.text,diary);
+  const before=await f.runtime.invokeAction('fish-notebook','list',{offset:0},{conversationKey:chat});assert.deepEqual(before.entries.map(entry=>entry.text),[diary]);assert.equal(before.errors,0);
+  const first=await f.ask(question(1));assert(!first.document);const after=await f.runtime.invokeAction('fish-notebook','list',{},{conversationKey:chat});assert.deepEqual(after.entries,before.entries);
+  assert.equal((await f.ask(question(2))).document,undefined);assert.equal((await f.runtime.invokeAction('fish-notebook','list',{},{conversationKey:group})).total,0);
+  const app=createConsole({root:f.root,port:0,fetchImpl:async()=>{throw Error('offline');}}),address=await app.start();t.after(()=>app.close());const base='http://127.0.0.1:'+address.port,info=await fetch(base+'/api/info').then(r=>r.json()),headers={'X-Console-Token':info.token,'Content-Type':'application/json'};
+  const catalog=await fetch(base+'/api/plugins',{headers}).then(r=>r.json()),item=catalog.plugins.find(row=>row.id==='fish-notebook');assert.equal(item.ui.page.title,'鱼的记事本');assert.equal(item.ui.settings,undefined);
+  const page=await fetch(base+item.ui.page.url);assert.equal(page.status,200);assert.match(page.headers.get('content-security-policy'),/connect-src 'none'/);
+  for(const route of ['/api/fish-notebook','/plugin-packages/fish-notebook.zip','/fish-notebook.js','/fish-notebook.css'])assert.notEqual((await fetch(base+route,{headers})).status,200,route);
+  for(const route of ['/api/fish-notebook/write','/api/fish-notebook/settings'])assert.notEqual((await fetch(base+route,{method:'POST',headers,body:JSON.stringify({scope:account,key:chat})})).status,200,route);
 });
 
 test('manifest schedule validation rejects impossible times and unowned legacy namespaces',()=>{

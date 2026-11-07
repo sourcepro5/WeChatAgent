@@ -60,9 +60,9 @@ export function createPersonaCategories(root){
       value.categories=value.categories.filter(item=>item!==group);
       value.assignments=Object.fromEntries(Object.entries(value.assignments).filter(([,id])=>id!==group.id));
     }else if(body.action==='assign'){
-      if(personaError(body.name,'check'))throw fail('请选择有效的人格卡。');
+      if(personaError(body.name,'check'))throw fail('请选择有效的人格。');
       const name=names().find(name=>name.toLocaleLowerCase()===body.name.toLocaleLowerCase());
-      if(!name)throw fail('人格卡已不存在，请刷新后重试。',404);
+      if(!name)throw fail('人格已不存在，请刷新后重试。',404);
       if(body.categoryId!==''&&!group)throw fail('分类已不存在，请刷新后重试。',409);
       if(body.categoryId==='')delete value.assignments[name];else Object.defineProperty(value.assignments,name,{value:group.id,enumerable:true,configurable:true,writable:true});
     }else throw fail('不支持的分类操作。');

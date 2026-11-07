@@ -100,7 +100,8 @@ body{background:var(--lg-bg)}
 .save-bar{left:calc(var(--lg-content-left) + var(--lg-content-pad));right:var(--lg-content-pad);bottom:calc(var(--lg-gap) + 6px)}
 .skip-link{left:calc(var(--lg-content-left) + var(--lg-gap))}
 
-/* 桌面应用：系统窗口按钮固定在窗口右上角且为不透明色块，顶栏贴顶并延伸到右边缘 */
+/* 桌面应用：系统窗口按钮固定在窗口右上角（main.cjs 中叠加层背景透明、高 56px），
+   顶栏贴顶并延伸到右边缘，让按钮直接落在同一块玻璃上；console.css 已为按钮预留右侧内边距 */
 .desktop-mode .workspace{padding-top:0}
 .desktop-mode .topbar{top:0;height:56px;margin-right:0;border-radius:0 0 0 18px;border-top:0;border-right:0}
 
@@ -179,7 +180,28 @@ body.has-wallpaper .page-heading{border-color:var(--lg-line-soft);border-radius:
 
 /* ---------- 顶栏内容 ---------- */
 .topbar{--lg-glare-size:520px;--lg-blur:10px}
-.desktop-mode .topbar{background-color:var(--lg-tint-strong);--lg-rim-angle:200deg}
+.desktop-mode .topbar{--lg-rim-angle:200deg}
+/* 桌面应用：用一条细分隔线把控制台操作与系统窗口按钮分开，样式同 .topbar-divider */
+.desktop-mode .topbar-actions::after{content:'';width:1px;height:20px;margin-left:8px;background:var(--lg-hair)}
+/* 桌面应用：页面滚动条那一列位于顶栏右侧、系统关闭键下方。
+   滚动轨道从顶栏下方开始（滑块不再与关闭键重叠），轨道上方那一截着与顶栏相同的玻璃色，让顶栏视觉上延伸到窗口边缘。
+   注意：html 为 overflow:visible 时，窗口滚动条的样式取自 body 而不是 html，因此这些规则都写在 body 上。 */
+body.desktop-mode::-webkit-scrollbar{background:linear-gradient(var(--lg-tint) 0 56px,transparent 56px)}
+body.desktop-mode::-webkit-scrollbar-track{margin-top:56px}
+
+/* 自定义背景图：滚动条那一列在视口之外，固定定位的背景图层盖不到，会露出一条底色竖条。
+   liquid-glass.js 从背景图在窗口右边缘处取色，生成竖向渐变 --lg-wall-strip 画在滚动条底下
+   （只需 11px 宽的一列，不必把整张可达 20 MB 的图片再挂到根元素上）；--lg-wall-veil 按图层透明度叠回底色，还原背景强度。 */
+html{--lg-wall-veil:color-mix(in srgb,var(--lg-bg) calc((1 - var(--lg-wall-alpha,1)) * 100%),transparent)}
+body.has-wallpaper::-webkit-scrollbar{background:
+  linear-gradient(var(--lg-wall-veil),var(--lg-wall-veil)) 0 0/100% 100% no-repeat,
+  var(--lg-wall-strip,none) 0 0/100% 100% no-repeat,
+  var(--lg-bg)}
+body.desktop-mode.has-wallpaper::-webkit-scrollbar{background:
+  linear-gradient(var(--lg-tint) 0 56px,transparent 56px) 0 0/100% 100% no-repeat,
+  linear-gradient(var(--lg-wall-veil),var(--lg-wall-veil)) 0 0/100% 100% no-repeat,
+  var(--lg-wall-strip,none) 0 0/100% 100% no-repeat,
+  var(--lg-bg)}
 .topbar-actions{gap:6px}
 .connection-label{padding:6px 12px;border-radius:999px;background:var(--lg-fill);box-shadow:inset 0 0 0 1px var(--lg-line-soft);transition:background .25s,color .25s,box-shadow .3s}
 .connection-label:hover{background:var(--lg-fill-hover);box-shadow:inset 0 0 0 1px var(--lg-line),var(--lg-drop-xs)}
@@ -242,20 +264,27 @@ tbody tr:hover{background:var(--lg-fill)}
 :root[data-theme=dark] .icon-button:hover{box-shadow:var(--lg-drop-xs),inset 0 1px 0 rgb(255 255 255/.08),inset 0 0 0 1px var(--lg-line-soft)}
 
 /* ---------- 概览电源键：液态玻璃水珠（::before 已被 motion.css 用作加载光环，高光用 ::after） ---------- */
-.power-control{border-radius:26px;border:1px solid rgb(255 255 255/.75);color:var(--accent-text);
+/* 主操作带可见文字（启动服务 / 停止服务 / 处理中…），不再只靠图标和旁边的说明 */
+.power-control{width:auto;height:54px;padding:0 22px 0 16px;gap:9px;font-size:13px;font-weight:600;letter-spacing:.02em;white-space:nowrap}
+.power-control svg{width:22px;height:22px}
+.power-control span{position:relative;z-index:1}
+.power-control,.power-control.active{border-radius:26px;border:1px solid rgb(255 255 255/.75);color:var(--accent-text);
   background:radial-gradient(120% 120% at 30% 18%,rgb(255 255 255/.95),rgb(255 255 255/.4) 46%,color-mix(in srgb,var(--accent-soft) 85%,transparent) 100%);
   box-shadow:0 14px 28px -14px color-mix(in srgb,var(--accent) 60%,transparent),inset 0 2px 1px rgb(255 255 255/.95),inset 0 -8px 14px -6px color-mix(in srgb,var(--accent) 28%,transparent),inset 0 0 0 1px rgb(255 255 255/.45)}
 .power-control::after{content:'';position:absolute;left:12%;right:12%;top:6%;height:40%;border-radius:20px 20px 50% 50%;background:linear-gradient(180deg,rgb(255 255 255/.8),rgb(255 255 255/0));pointer-events:none;opacity:.75;transition:opacity .3s,transform .5s var(--ease-spring)}
 .power-control:hover::after{transform:translateY(-2px) scaleX(1.05);opacity:.95}
 .power-control svg{position:relative;z-index:1;filter:drop-shadow(0 1px 0 rgb(255 255 255/.6))}
-.power-control:hover{background:radial-gradient(120% 120% at 30% 18%,rgb(255 255 255/1),rgb(255 255 255/.5) 46%,color-mix(in srgb,var(--accent-soft) 95%,transparent) 100%)}
-.power-control.active{border-color:color-mix(in srgb,var(--accent) 40%,rgb(255 255 255/.6));color:var(--on-accent);
+.power-control:hover,.power-control.active:hover{background:radial-gradient(120% 120% at 30% 18%,rgb(255 255 255/1),rgb(255 255 255/.5) 46%,color-mix(in srgb,var(--accent-soft) 95%,transparent) 100%)}
+/* 未运行（或启动失败需重试）时"启动服务"是主操作，用主题色实心；运行中"停止服务"保持普通玻璃样式，不再是整页最醒目的按钮 */
+.power-control.active{animation:none}
+.power-control[data-action=start]:not(:disabled){border-color:color-mix(in srgb,var(--accent) 40%,rgb(255 255 255/.6));color:var(--on-accent);
   background:radial-gradient(120% 120% at 30% 12%,color-mix(in srgb,var(--accent) 45%,#fff),var(--accent) 55%,var(--accent-hover) 100%)}
-.power-control.active svg{filter:drop-shadow(0 1px 1px rgb(0 0 0/.2))}
-.power-control.active::after{opacity:.55}
-:root[data-theme=dark] .power-control{border-color:rgb(255 255 255/.14);background:radial-gradient(120% 120% at 30% 18%,rgb(255 255 255/.18),rgb(255 255 255/.04) 50%,var(--accent-soft) 100%);box-shadow:0 14px 28px -14px rgb(0 0 0/.7),inset 0 1px 1px rgb(255 255 255/.22),inset 0 -8px 14px -6px rgb(0 0 0/.35)}
+.power-control[data-action=start]:not(:disabled) svg{filter:drop-shadow(0 1px 1px rgb(0 0 0/.2))}
+.power-control[data-action=start]:not(:disabled)::after{opacity:.55}
+.power-control[data-action=start]:not(:disabled):hover{filter:brightness(1.06)}
+:root[data-theme=dark] .power-control,:root[data-theme=dark] .power-control.active{border-color:rgb(255 255 255/.14);background:radial-gradient(120% 120% at 30% 18%,rgb(255 255 255/.18),rgb(255 255 255/.04) 50%,var(--accent-soft) 100%);box-shadow:0 14px 28px -14px rgb(0 0 0/.7),inset 0 1px 1px rgb(255 255 255/.22),inset 0 -8px 14px -6px rgb(0 0 0/.35)}
 :root[data-theme=dark] .power-control::after{opacity:.18}
-:root[data-theme=dark] .power-control.active{background:radial-gradient(120% 120% at 30% 12%,color-mix(in srgb,var(--accent) 60%,#fff),var(--accent) 55%,color-mix(in srgb,var(--accent) 70%,#000))}
+:root[data-theme=dark] .power-control[data-action=start]:not(:disabled){background:radial-gradient(120% 120% at 30% 12%,color-mix(in srgb,var(--accent) 60%,#fff),var(--accent) 55%,color-mix(in srgb,var(--accent) 70%,#000))}
 /* 覆盖 motion.css 的同名关键帧：呼吸光晕之外保留水珠的内高光 */
 @keyframes motion-breathe{
   0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--accent) 38%,transparent),0 12px 26px -12px color-mix(in srgb,var(--accent) 80%,transparent),inset 0 2px 1px rgb(255 255 255/.55),inset 0 -8px 14px -6px rgb(0 0 0/.18)}

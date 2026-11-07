@@ -1,12 +1,13 @@
 {
   "id": "chat-notes",
   "name": "聊天小便签",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "apiVersion": 2,
   "host": "wechatagent",
   "author": "WeChatAgent",
   "description": "在当前聊天记下、查看和清空便签，数据不会与其他聊天或微信账号混用。",
   "permissions": ["storage"],
+  "requiresHostFeatures": ["actions-v1"],
   "settings": {"maxNotes":20},
   "configSchema": {
     "maxNotes":{"type":"integer","title":"最多保留便签数","minimum":1,"maximum":50}

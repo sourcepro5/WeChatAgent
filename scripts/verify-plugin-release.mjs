@@ -39,8 +39,17 @@ const bundledWechatVersion=packagedManifest.wechatVersion??'4.1.10.27';
 const vendorReports=[];
 for(const directory of [path.join(root,'state/installer-stage/vendor'),path.join(root,'release/installer/win-unpacked/resources/vendor')]){
   verifyWeChatClient(path.join(directory,'wechat'),bundledWechatVersion);
-  verifyHookBuild(path.join(directory,'hook'));
-  const current=bundledWechatVersion==='4.1.15.13'?verifyHookBuild(path.join(directory,'hook-current'),bundledWechatVersion):null;
+  if(JSON.stringify(packagedManifest.bundledWechatVersions)!==JSON.stringify([bundledWechatVersion]))throw Error('INSTALLER_MIXED_WECHAT_VERSIONS');
+  const clientVersions=fs.readdirSync(path.join(directory,'wechat'),{withFileTypes:true}).filter(entry=>entry.isDirectory()).map(entry=>entry.name);
+  if(JSON.stringify(clientVersions)!==JSON.stringify([bundledWechatVersion]))throw Error('INSTALLER_OLD_WECHAT_CLIENT_INCLUDED');
+  if(bundledWechatVersion==='4.1.10.27')verifyHookBuild(path.join(directory,'hook'));
+  else if(fs.existsSync(path.join(directory,'hook')))throw Error('INSTALLER_OLD_HOOK_INCLUDED');
+  const current=['4.1.15.13','4.2.0.12'].includes(bundledWechatVersion)?verifyHookBuild(path.join(directory,'hook-current'),bundledWechatVersion):null;
+  if(current){
+    const files=fs.readdirSync(path.join(directory,'hook-current')).sort();
+    if(JSON.stringify(files)!==JSON.stringify(['build.json','wechatagent-text-'+bundledWechatVersion+'.dll','wechatagent-text-loader.exe'].sort()))throw Error('INSTALLER_UNEXPECTED_NATIVE_PAYLOAD');
+    for(const file of ['load-hook-42012.ps1','build-hook-42012.ps1'])if(bundledWechatVersion==='4.2.0.12'&&!fs.existsSync(path.join(stage,'scripts',file)))throw Error('INSTALLER_4_2_LOADER_MISSING');
+  }
   vendorReports.push({version:bundledWechatVersion,clientSha256:hash(fs.readFileSync(path.join(directory,'wechat/Weixin.exe'))),coreSha256:hash(fs.readFileSync(path.join(directory,'wechat',bundledWechatVersion,'Weixin.dll'))),nativeProfile:current?.profile??null,nativeSha256:current?.sha256??null,loaderSha256:current?.loaderSha256??null});
 }
 if(JSON.stringify(vendorReports[0])!==JSON.stringify(vendorReports[1]))throw Error('INSTALLER_VENDOR_RESOURCES_DIVERGED');
@@ -51,11 +60,13 @@ const assets=[installerRelative,sourceReport.asset.path,...BUNDLED_PLUGINS.filte
 const roleAsset='release/installer/蓝色大肥鱼-小助手.md';if(fs.existsSync(path.join(root,roleAsset)))assets.push(roleAsset);
 const assetRecords=assets.map(relative=>{const data=fs.readFileSync(path.join(root,relative));return {path:relative,bytes:data.length,sha256:hash(data)};});
 if(assetRecords.find(item=>item.path===sourceReport.asset.path).sha256!==sourceReport.asset.sha256)throw Error('SOURCE_ARCHIVE_CHANGED');
+const liveAcceptance=bundledWechatVersion==='4.2.0.12'?JSON.parse(fs.readFileSync(path.join(root,'release-profile.json'),'utf8')).verification?.wechat42012:null;
+if(bundledWechatVersion==='4.2.0.12'&&(!liveAcceptance?.coldStart||!liveAcceptance?.textReceipt||!liveAcceptance?.imageReceipt||!liveAcceptance?.stickerReceipt||!liveAcceptance?.animatedSticker||liveAcceptance.nativeSha256!==vendorReports[0].nativeSha256))throw Error('RELEASE_RUNTIME_ACCEPTANCE_MISMATCH');
 const report={version,packageVersion,ok:true,...templateReports[0],checkedAt:new Date().toISOString(),pluginHost:sourceAudit.contract,
   sourcePrivacy:{candidateFiles:privacy.candidateFiles,findings:privacy.findings},templateFilesVerified:templateReports,bundledWechat:vendorReports[0],
   sourceFiles:sourceReport.sourceFiles,assets:assetRecords,regression:JSON.parse(fs.readFileSync(path.join(root,'release-profile.json'),'utf8')).verification?.publicRegression??null,pluginAutoInstalled:false,pluginAutoEnabled:false,
-  servicesRestarted:false,realWeChatStarted:false,actualUserDataUsed:false,publication:'local-build-only',
-  validationLimits:['Static packaged-file, host-contract, source-file-set and artifact-hash verification; application installation and live ASR were not performed.','Automated plugin, console, deployment and synthetic voice tests are recorded in docs/PLUGIN_HOST_AUDIT.md.']};
+  servicesRestarted:liveAcceptance?.servicesRestarted===true,realWeChatStarted:!!liveAcceptance,actualUserDataUsed:!!liveAcceptance,liveAcceptance,publication:'local-build-only',
+  validationLimits:['Packaged-file, host-contract, source-file-set and artifact-hash verification. WeChat 4.2 cold login, filehelper text/image/native animated GIF receipts and bridge deduplication were tested locally; second-device installation, group mentions, long-running stability and live ASR were not tested.','Automated plugin, console, deployment and synthetic voice tests are recorded in docs/PLUGIN_HOST_AUDIT.md.']};
 const release=path.join(root,'release/installer');
 fs.writeFileSync(path.join(release,'VERIFICATION.json'),JSON.stringify(report,null,2)+'\n');
 fs.writeFileSync(path.join(release,'VERIFICATION-'+version+'.json'),JSON.stringify(report,null,2)+'\n');

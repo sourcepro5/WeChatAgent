@@ -21,33 +21,47 @@ const REFRACT = [
   { selector: '.save-bar', bezel: 18, scale: 26 },
   { selector: '.job-panel', bezel: 18, scale: 26 },
 ];
-const canRefract = () => !!navigator.userAgentData && CSS.supports('backdrop-filter', 'url(#a) blur(1px)') && !reduceTransparency.matches;
+const canRefract = () =>
+  !!navigator.userAgentData && CSS.supports('backdrop-filter', 'url(#a) blur(1px)') && !reduceTransparency.matches;
 
 function displacementMap(width, height, radius, bezel) {
   const canvas = document.createElement('canvas');
-  canvas.width = width; canvas.height = height;
+  canvas.width = width;
+  canvas.height = height;
   const context = canvas.getContext('2d');
   const image = context.createImageData(width, height);
   const data = image.data;
-  const halfW = width / 2, halfH = height / 2;
+  const halfW = width / 2,
+    halfH = height / 2;
   const r = Math.min(radius, halfW, halfH);
   for (let y = 0; y < height; y++) {
-    const py = y + .5 - halfH, ay = Math.abs(py), qy = ay - (halfH - r);
+    const py = y + 0.5 - halfH,
+      ay = Math.abs(py),
+      qy = ay - (halfH - r);
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;
-      const px = x + .5 - halfW, ax = Math.abs(px), qx = ax - (halfW - r);
+      const px = x + 0.5 - halfW,
+        ax = Math.abs(px),
+        qx = ax - (halfW - r);
       // 圆角矩形的有向距离场与外法线
       let distance, nx, ny;
       if (qx > 0 && qy > 0) {
         const length = Math.hypot(qx, qy);
-        distance = length - r; nx = qx / length; ny = qy / length;
+        distance = length - r;
+        nx = qx / length;
+        ny = qy / length;
       } else if (qx > qy) {
-        distance = qx - r; nx = 1; ny = 0;
+        distance = qx - r;
+        nx = 1;
+        ny = 0;
       } else {
-        distance = qy - r; nx = 0; ny = 1;
+        distance = qy - r;
+        nx = 0;
+        ny = 1;
       }
       const depth = -distance;
-      let dx = 0, dy = 0;
+      let dx = 0,
+        dy = 0;
       if (depth > 0 && depth < bezel) {
         const t = 1 - depth / bezel;
         const magnitude = t * t;
@@ -76,17 +90,32 @@ function installRefraction() {
   document.body.append(defs);
   let serial = 0;
   const entries = new Map();
-  const attrs = (el, values) => { for (const [key, value] of Object.entries(values)) el.setAttribute(key, String(value)); };
+  const attrs = (el, values) => {
+    for (const [key, value] of Object.entries(values)) el.setAttribute(key, String(value));
+  };
 
   // 为一个玻璃元素创建专属滤镜：feImage 载入位移贴图，feDisplacementMap 按贴图偏移背景
   const createFilter = (el, spec) => {
     const id = `lg-refract-${++serial}`;
     const filter = document.createElementNS(SVG_NS, 'filter');
-    attrs(filter, { id, x: 0, y: 0, filterUnits: 'userSpaceOnUse', primitiveUnits: 'userSpaceOnUse', 'color-interpolation-filters': 'sRGB' });
+    attrs(filter, {
+      id,
+      x: 0,
+      y: 0,
+      filterUnits: 'userSpaceOnUse',
+      primitiveUnits: 'userSpaceOnUse',
+      'color-interpolation-filters': 'sRGB',
+    });
     const map = document.createElementNS(SVG_NS, 'feImage');
     attrs(map, { x: 0, y: 0, result: 'map', preserveAspectRatio: 'none' });
     const displace = document.createElementNS(SVG_NS, 'feDisplacementMap');
-    attrs(displace, { in: 'SourceGraphic', in2: 'map', scale: spec.scale, xChannelSelector: 'R', yChannelSelector: 'G' });
+    attrs(displace, {
+      in: 'SourceGraphic',
+      in2: 'map',
+      scale: spec.scale,
+      xChannelSelector: 'R',
+      yChannelSelector: 'G',
+    });
     filter.append(map, displace);
     defs.append(filter);
     const entry = { el, spec, id, filter, map, size: '', timer: 0 };
@@ -97,7 +126,8 @@ function installRefraction() {
   // 尺寸或圆角变化时重新生成贴图（尺寸为 0 表示元素当前隐藏，跳过）
   const refreshMap = entry => {
     const { el, spec, filter, map } = entry;
-    const width = Math.round(el.offsetWidth), height = Math.round(el.offsetHeight);
+    const width = Math.round(el.offsetWidth),
+      height = Math.round(el.offsetHeight);
     if (width < 8 || height < 8) return;
     const radius = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
     const size = `${width}x${height}x${radius}`;
@@ -139,7 +169,10 @@ const TILT_MAX_DEG = 3.2;
 const TILT_VARS = ['--lg-tilt-x', '--lg-tilt-y', '--lg-tilt'];
 
 function installPointerLight() {
-  let frame = 0, last = null, tilted = null, ambient = null;
+  let frame = 0,
+    last = null,
+    tilted = null,
+    ambient = null;
 
   const setGlare = (glass, event) => {
     const rect = glass.getBoundingClientRect();
@@ -150,14 +183,14 @@ function installPointerLight() {
     // 背景层由 motion.js 创建；按需查找，不依赖两个模块的执行顺序
     ambient ??= document.querySelector('.motion-ambient');
     if (!ambient) return;
-    ambient.style.setProperty('--px', (event.clientX / innerWidth * 2 - 1).toFixed(3));
-    ambient.style.setProperty('--py', (event.clientY / innerHeight * 2 - 1).toFixed(3));
+    ambient.style.setProperty('--px', ((event.clientX / innerWidth) * 2 - 1).toFixed(3));
+    ambient.style.setProperty('--py', ((event.clientY / innerHeight) * 2 - 1).toFixed(3));
   };
   // 绕"垂直于指针方向"的轴旋转：指针所在的一角轻轻下沉，离中心越远倾斜越大
   const setTilt = (card, event) => {
     const rect = card.getBoundingClientRect();
-    const nx = (event.clientX - rect.left) / rect.width * 2 - 1;
-    const ny = (event.clientY - rect.top) / rect.height * 2 - 1;
+    const nx = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = ((event.clientY - rect.top) / rect.height) * 2 - 1;
     const amount = Math.min(1, Math.hypot(nx, ny));
     card.style.setProperty('--lg-tilt-x', (-ny).toFixed(3));
     card.style.setProperty('--lg-tilt-y', nx.toFixed(3));
@@ -177,20 +210,33 @@ function installPointerLight() {
     const event = last;
     const glass = event.target.closest?.(GLARE_TARGETS);
     if (glass) setGlare(glass, event);
-    if (reduceMotion.matches) { resetTilt(); return; }
+    if (reduceMotion.matches) {
+      resetTilt();
+      return;
+    }
     setParallax(event);
     const card = event.target.closest?.(TILT_TARGETS) ?? null;
     if (card !== tilted) resetTilt();
     if (card) setTilt(card, event);
   };
 
-  document.addEventListener('pointermove', event => {
-    if (event.pointerType !== 'mouse' || !finePointer.matches) return;
-    last = event;
-    if (!frame) frame = requestAnimationFrame(paint);
-  }, { passive: true });
+  document.addEventListener(
+    'pointermove',
+    event => {
+      if (event.pointerType !== 'mouse' || !finePointer.matches) return;
+      last = event;
+      if (!frame) frame = requestAnimationFrame(paint);
+    },
+    { passive: true },
+  );
   // 指针离开窗口（relatedTarget 为空）、窗口失焦或按下时，卡片回正
-  document.addEventListener('pointerout', event => { if (!event.relatedTarget) resetTilt(); }, { passive: true });
+  document.addEventListener(
+    'pointerout',
+    event => {
+      if (!event.relatedTarget) resetTilt();
+    },
+    { passive: true },
+  );
   document.addEventListener('pointerdown', resetTilt, { passive: true });
   window.addEventListener('blur', resetTilt);
 }
@@ -202,29 +248,42 @@ const THUMB_GROUPS = [
   { selector: '.segmented', active: ':scope>button.selected' },
   { selector: '.workspace-tabs', active: ':scope>[aria-current=page],:scope>[aria-pressed=true]' },
 ];
-const thumbMemory = new Map();     // key -> 最近一次的滑块位置，跨重绘保留
+const thumbMemory = new Map(); // key -> 最近一次的滑块位置，跨重绘保留
 const thumbStates = new WeakMap(); // container -> { group, key, thumb, geo }
 
 const measure = el => ({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight });
 const sameGeo = (a, b) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 
 function liquidMove(el, from, to) {
-  const dx = to.x - from.x, dy = to.y - from.y;
+  const dx = to.x - from.x,
+    dy = to.y - from.y;
   const distance = Math.hypot(dx, dy);
   // 沿主要移动方向拉长、另一方向收窄；到位时反向轻压一下再复原
-  const stretch = Math.min(.28, .06 + distance / 700);
+  const stretch = Math.min(0.28, 0.06 + distance / 700);
   const horizontal = Math.abs(dx) >= Math.abs(dy);
-  const sx = horizontal ? 1 + stretch : 1 - stretch * .45;
-  const sy = horizontal ? 1 - stretch * .45 : 1 + stretch;
-  const box = (geo, scale = '') => ({ transform: `translate(${geo.x}px,${geo.y}px)${scale}`, width: geo.w + 'px', height: geo.h + 'px' });
+  const sx = horizontal ? 1 + stretch : 1 - stretch * 0.45;
+  const sy = horizontal ? 1 - stretch * 0.45 : 1 + stretch;
+  const box = (geo, scale = '') => ({
+    transform: `translate(${geo.x}px,${geo.y}px)${scale}`,
+    width: geo.w + 'px',
+    height: geo.h + 'px',
+  });
   const lerp = (a, b, t) => a + (b - a) * t;
-  const mid = { x: lerp(from.x, to.x, .58), y: lerp(from.y, to.y, .58), w: lerp(from.w, to.w, .58), h: lerp(from.h, to.h, .58) };
-  el.animate([
-    box(from),
-    { ...box(mid, ` scale(${sx},${sy})`), offset: .42 },
-    { ...box(to, ` scale(${1 - (sx - 1) * .3},${1 - (sy - 1) * .3})`), offset: .74 },
-    box(to),
-  ], { duration: 620, easing: 'cubic-bezier(.3,.8,.25,1)' });
+  const mid = {
+    x: lerp(from.x, to.x, 0.58),
+    y: lerp(from.y, to.y, 0.58),
+    w: lerp(from.w, to.w, 0.58),
+    h: lerp(from.h, to.h, 0.58),
+  };
+  el.animate(
+    [
+      box(from),
+      { ...box(mid, ` scale(${sx},${sy})`), offset: 0.42 },
+      { ...box(to, ` scale(${1 - (sx - 1) * 0.3},${1 - (sy - 1) * 0.3})`), offset: 0.74 },
+      box(to),
+    ],
+    { duration: 620, easing: 'cubic-bezier(.3,.8,.25,1)' },
+  );
 }
 
 function thumbKey(container, group) {
@@ -270,7 +329,11 @@ function adoptThumbContainer(container, group) {
   // 选中项变化时重新定位；忽略容器自身与滑块的属性变化（placeThumb 会修改它们，避免自触发循环）
   new MutationObserver(records => {
     if (records.some(record => record.target !== container && record.target !== state.thumb)) placeThumb(container);
-  }).observe(container, { subtree: true, attributes: true, attributeFilter: ['class', 'aria-current', 'aria-pressed', 'hidden'] });
+  }).observe(container, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class', 'aria-current', 'aria-pressed', 'hidden'],
+  });
   new ResizeObserver(() => placeThumb(container, { animate: false })).observe(container);
   placeThumb(container);
 }
@@ -292,11 +355,90 @@ function installThumbs() {
   adoptNew();
 }
 
+// ---------- 自定义背景图：在滚动条下方接续绘制 ----------
+// 背景图层 #app-background 是固定定位元素，只覆盖视口（不含滚动条那一列），那一列会露出底色竖条。
+// Chromium 不会在滚动条样式里加载 url() 图片（渐变可以），所以这里按图层的 cover + center 布局，
+// 用 canvas 取出图片在窗口右边缘处、从上到下的颜色，写成一条竖向渐变（--lg-wall-strip），
+// 由 liquid-glass.css 画在滚动条底下；--lg-wall-alpha 用于还原背景强度（图层透明度）。
+const WALL_STRIP_BANDS = 48;
+
+function wallpaperStrip(image, viewportWidth, viewportHeight, scrollbarWidth) {
+  const { naturalWidth: imageWidth, naturalHeight: imageHeight } = image;
+  const scale = Math.max(viewportWidth / imageWidth, viewportHeight / imageHeight);
+  const left = (viewportWidth - imageWidth * scale) / 2,
+    top = (viewportHeight - imageHeight * scale) / 2;
+  // 滚动条那一列对应的图片区域；图片恰好按宽度铺满时右侧没有剩余，退而取最右侧的一窄条
+  const sliceWidth = Math.max(1, scrollbarWidth / scale);
+  const x0 = Math.min((viewportWidth - left) / scale, imageWidth - sliceWidth);
+  const y0 = Math.max(0, -top / scale),
+    y1 = Math.min(imageHeight, (viewportHeight - top) / scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = WALL_STRIP_BANDS;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(image, x0, y0, sliceWidth, y1 - y0, 0, 0, 1, WALL_STRIP_BANDS);
+  const pixels = context.getImageData(0, 0, 1, WALL_STRIP_BANDS).data;
+  const stops = [];
+  for (let band = 0; band < WALL_STRIP_BANDS; band++) {
+    const [r, g, b] = pixels.subarray(band * 4, band * 4 + 3);
+    stops.push(`rgb(${r} ${g} ${b}) ${(((band + 0.5) / WALL_STRIP_BANDS) * 100).toFixed(2)}%`);
+  }
+  return `linear-gradient(${stops.join(',')})`;
+}
+
+function installWallpaperUnderScrollbar() {
+  const layer = document.getElementById('app-background');
+  if (!layer) return;
+  const root = document.documentElement;
+  const written = new Map();
+  const setVar = (name, value) => {
+    if (written.get(name) === value) return; // 避免重复写入根元素导致整页样式重算
+    written.set(name, value);
+    if (value === null) root.style.removeProperty(name);
+    else root.style.setProperty(name, value);
+  };
+  let source = '',
+    image = null;
+
+  const update = () => {
+    const url = document.body.classList.contains('has-wallpaper') ? layer.style.backgroundImage : '';
+    if (!url) {
+      setVar('--lg-wall-strip', null);
+      setVar('--lg-wall-alpha', null);
+      source = '';
+      image = null;
+      return;
+    }
+    if (url !== source) {
+      // 新图片：等它解码完成后再取色
+      source = url;
+      image = new Image();
+      image.onload = update;
+      image.src = url.replace(/^url\(["']?/, '').replace(/["']?\)$/, '');
+    }
+    setVar('--lg-wall-alpha', layer.style.opacity || '1');
+    if (!image?.naturalWidth) return;
+    const width = root.clientWidth; // 图层宽度：视口去掉滚动条
+    const scrollbar = innerWidth - width;
+    if (scrollbar <= 0) return; // 页面没有滚动条，无需接续
+    setVar('--lg-wall-strip', wallpaperStrip(image, width, innerHeight, scrollbar));
+  };
+
+  new MutationObserver(update).observe(layer, { attributes: true, attributeFilter: ['style'] });
+  new MutationObserver(update).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  // 窗口尺寸变化、滚动条出现或消失（页面高度变化）都会改变 clientWidth
+  new ResizeObserver(update).observe(root);
+  addEventListener('resize', update);
+  update();
+}
+
 // ---------- 启动 ----------
 function init() {
   installRefraction();
   installPointerLight();
   installThumbs();
+  installWallpaperUnderScrollbar();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
 else init();

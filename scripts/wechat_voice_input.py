@@ -26,17 +26,19 @@ def voice_info(text):
         return None
 
 
-def audio_policy(root, key, plugin_id='speech-recognition'):
-    if not re.fullmatch(r'wechat:(private|group):[1-9]\d*', key or '') or not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', plugin_id or ''):
+def audio_policy(root, key, plugin_id=None):
+    """Whether plugin_id may read voice in this chat. plugin_id=None asks whether
+    any plugin may; references are only kept for chats where one can."""
+    if not re.fullmatch(r'wechat:(private|group):[1-9]\d*', key or '') or plugin_id is not None and (not isinstance(plugin_id, str) or not re.fullmatch(r'[a-z][a-z0-9-]{0,39}', plugin_id)):
         return False
     try:
         project = json.loads((pathlib.Path(root)/'config/wechatagent.json').read_text(encoding='utf-8-sig'))
         kind, target = key.split(':')[1:]
         if target not in map(str, project.get('wechat', {}).get('whitelist', {}).get('groups' if kind == 'group' else 'private', [])):
             return False
-        config = json.loads((pathlib.Path(root)/'config/plugins.json').read_text(encoding='utf-8-sig'))
-        saved = config.get('plugins', {}).get(plugin_id, {})
-        return saved.get('enabled') is True and 'audio_read' in saved.get('permissions', []) and (saved.get('chats') is None or key in saved.get('chats', []))
+        plugins = json.loads((pathlib.Path(root)/'config/plugins.json').read_text(encoding='utf-8-sig')).get('plugins', {})
+        candidates = list(plugins.values()) if plugin_id is None else [plugins.get(plugin_id, {})]
+        return any(saved.get('enabled') is True and 'audio_read' in saved.get('permissions', []) and (saved.get('chats') is None or key in saved.get('chats', [])) for saved in candidates)
     except (OSError, ValueError, TypeError, AttributeError):
         return False
 

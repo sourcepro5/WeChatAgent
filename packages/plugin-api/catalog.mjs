@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {validateSchema,validateValue,atomicJson,allowedChat,publicSettings} from '../extension-runtime/catalog.mjs';
-import {API_VERSION,PERMISSIONS,HOST_FEATURES,HOOKS,requiredHostFeatures,hostContract,hostCompatibility,HOST_RUNTIME} from './contract.mjs';
+import {API_VERSION,PERMISSIONS,HOST_FEATURES,HOOKS,FEATURE_ENTRIES,requiredHostFeatures,hostContract,hostCompatibility,HOST_RUNTIME} from './contract.mjs';
 export {API_VERSION,PERMISSIONS,HOST_FEATURES,HOOKS} from './contract.mjs';
 
 export const LIMITS=Object.freeze({zipBytes:8*1024*1024,expandedBytes:16*1024*1024,fileBytes:4*1024*1024,files:128,plugins:32});
@@ -110,15 +110,29 @@ export function pluginCatalog(root,runtime=[]){
       reason:item.invalid?item.reason:!enabled?'已安装，尚未启用':state?.reason??'设置已保存，等待加载新版 DSH 桥接',statusLabel:item.invalid?'清单无效':!enabled?'已关闭':state?.active?'已开启':'待生效',statusTone:item.invalid?'error':!enabled?'muted':state?.active?'ok':'warning'};
   })};
 }
-export function pluginEnabled(root,id,key){
-  if(!ID.test(id??'')||!allowedChat(root,key))return false;
+function enabledFor(root,id,key,plugins){
+  if(!ID.test(id??''))return null;
   try{
     const folder=path.join(root,'plugins',id),file=path.join(folder,'plugin.json');
-    for(const candidate of [path.join(root,'plugins'),folder,file])if(fs.lstatSync(candidate).isSymbolicLink())return false;
-    if(fs.statSync(file).size>65536)return false;
-    const item=manifest(json(file)),saved=configuration(root).config.plugins[id];
-    return item.id===id&&saved?.enabled===true&&item.permissions.every(p=>saved.permissions?.includes(p))&&(saved.chats===null||saved.chats?.includes(key));
-  }catch{return false;}
+    for(const candidate of [path.join(root,'plugins'),folder,file])if(fs.lstatSync(candidate).isSymbolicLink())return null;
+    if(fs.statSync(file).size>65536)return null;
+    const item=manifest(json(file)),saved=plugins[id];
+    return item.id===id&&saved?.enabled===true&&item.permissions.every(p=>saved.permissions?.includes(p))&&(saved.chats===null||saved.chats?.includes(key))?{item,saved}:null;
+  }catch{return null;}
+}
+export function pluginEnabled(root,id,key){
+  if(!ID.test(id??'')||!allowedChat(root,key))return false;
+  try{return !!enabledFor(root,id,key,configuration(root).config.plugins);}catch{return false;}
+}
+// Enabled plugins for this chat that opted into a FEATURE_ENTRIES host feature,
+// with the settings generation each one runs under. Sorted by id.
+export function featurePlugins(root,feature,key){
+  const entry=FEATURE_ENTRIES[feature];if(!entry||!allowedChat(root,key))return [];
+  let plugins;try{plugins=configuration(root).config.plugins;}catch{return [];}
+  return Object.keys(plugins).sort().flatMap(id=>{
+    const found=enabledFor(root,id,key,plugins);
+    return found&&found.item.requiresHostFeatures.includes(feature)&&found.saved.permissions.includes(entry.permission)?[{id,generation:String(found.saved.generation??'')}]:[];
+  });
 }
 export function runtimeCatalog(catalog,live){
   const connected=!!live&&(live.runtime??live.pluginRuntime)===HOST_RUNTIME;

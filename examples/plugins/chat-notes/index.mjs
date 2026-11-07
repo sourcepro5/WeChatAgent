@@ -13,4 +13,22 @@ export function setup(api){
       return {content:'已在当前聊天记下这条便签：'+args.text.trim()};
     },
   });
+  // Actions are only for the plugin's own page (ui/page.html); the model never sees them.
+  api.registerAction({
+    id:'list',
+    description:'本机插件页面读取所选聊天的便签。',
+    parameters:{type:'object',properties:{},additionalProperties:false},
+    async execute(ctx){return {notes:await ctx.storage.get('notes')??[]};},
+  });
+  api.registerAction({
+    id:'remove',
+    description:'本机插件页面删除所选聊天的一条便签。',
+    parameters:{type:'object',properties:{index:{type:'integer',minimum:0,maximum:49}},required:['index'],additionalProperties:false},
+    async execute(ctx,args){
+      const notes=await ctx.storage.get('notes')??[];
+      notes.splice(args.index,1);
+      await ctx.storage.set('notes',notes);
+      return {notes};
+    },
+  });
 }

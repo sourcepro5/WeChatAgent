@@ -15,7 +15,8 @@ export function hookAccountProblem(health,expectedAccount,expectedVersion='4.1.1
   if(health.integration!=='WeChatAgent-1'||health.backend!=='wechat-hook')return 'REVIEWED_HOOK_BUILD_REQUIRED';
   if(health.version!==expectedVersion||!hookProfile(health.version))return 'HOOK_VERSION_MISMATCH';
   if(expectedVersion==='4.1.15.13'&&(!['4.1.15.13-text-v1','4.1.15.13-media-mentions-v2'].includes(health.profile)||health.nativeTextSend!==true))return 'HOOK_INITIALIZATION_PENDING';
-  if(expectedVersion==='4.2.0.12'&&(health.profile!=='4.2.0.12-experimental-v1'||health.nativeTextSend!==true))return 'HOOK_INITIALIZATION_PENDING';
+  if(expectedVersion==='4.2.0.12'&&(!['4.2.0.12-experimental-v1','4.2.0.12-stickers-v2'].includes(health.profile)||health.nativeTextSend!==true))return 'HOOK_INITIALIZATION_PENDING';
+  if(expectedVersion==='4.2.0.12'&&health.profile==='4.2.0.12-stickers-v2'&&health.nativeStickerSend!==true)return 'HOOK_INITIALIZATION_PENDING';
   if(health.startupState!==undefined&&health.startupState!=='ready')return 'HOOK_INITIALIZATION_PENDING';
   if(!Array.isArray(health.databaseAccounts)||health.databaseAccounts.some(account=>typeof account!=='string'||!account))return 'HOOK_ACCOUNT_METADATA_INVALID';
   if(!health.databaseAccounts.length)return 'HOOK_LOGIN_REQUIRED';

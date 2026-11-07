@@ -126,5 +126,13 @@ Thumbs.db
 /config/plugins.json
 
 # Verified first-party plugin included in the source release
-!/optional-extensions/packages/fish-notebook-1.0.0.zip
-!/optional-extensions/packages/speech-recognition-1.2.0.zip
+!/optional-extensions/packages/fish-notebook-1.1.1.zip
+!/optional-extensions/packages/speech-recognition-1.5.0.zip
+
+# 旧版插件 ZIP 不发布，其校验文件一并忽略；只保留上面两个发布包的校验
+/optional-extensions/packages/*.sha256
+!/optional-extensions/packages/fish-notebook-1.1.1.zip.sha256
+!/optional-extensions/packages/speech-recognition-1.5.0.zip.sha256
+
+# 开发验证报告（含本机路径与内部测试记录），不随公开源码发布
+/docs/reports/

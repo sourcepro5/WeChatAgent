@@ -49,7 +49,7 @@ export class DshPluginClient {
     const requestBody=JSON.stringify({...requestMetadata,...(persona===undefined?{}:{personaDigest:crypto.createHash('sha256').update(persona).digest('hex')}),conversationKey,message});
     if(Buffer.byteLength(requestBody,'utf8')>MAX_RPC_BYTES)throw Object.assign(Error('DSH plugin: request_too_large (REQUEST_TOO_LARGE)'),{code:'REQUEST_TOO_LARGE',admitted:false,limitBytes:MAX_RPC_BYTES});
     if(metadata.fishNotebookRequest){
-      try{const question=await fetch(this.url+'/fish-notebook/ask',{method:'POST',headers:{authorization:'Bearer '+this.token,'content-type':'application/json'},body:requestBody,signal:AbortSignal.timeout(45000)});if(question.status!==404){const result=await question.json();if(!question.ok)return 'RESPOND: 小本本这页暂时没有整理好，稍后再来看看吧。';if(result.handled){metadata.fishNotebookDocument=result.document===true;return String(result.text);}}}
+      try{const question=await fetch(this.url+'/diary-question',{method:'POST',headers:{authorization:'Bearer '+this.token,'content-type':'application/json'},body:requestBody,signal:AbortSignal.timeout(45000)});if(question.status!==404){const result=await question.json();if(!question.ok)return 'RESPOND: 小本本这页暂时没有整理好，稍后再来看看吧。';if(result.handled){metadata.fishNotebookDocument=result.document===true;return String(result.text);}}}
       catch{return 'RESPOND: 小本本这页还在整理，稍后再来看看吧。';}
     }
     const chatOnly=metadata.workMode==='assistant'&&metadata.assistantChatOnly===true;

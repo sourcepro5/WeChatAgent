@@ -5,7 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {windowsPowerShellEnvironment,windowsPowerShellExecutable} from './console-process.mjs';
 
 export function verifyWeChatClient(directory,version){
-  if(!['4.1.10.27','4.1.15.13'].includes(version))throw new Error('Unsupported bundled WeChat version.');
+  if(!['4.1.10.27','4.1.15.13','4.2.0.12'].includes(version))throw new Error('Unsupported bundled WeChat version.');
   const command=`$ErrorActionPreference='Stop'; foreach($file in @((Join-Path $env:WECHATAGENT_BUILD_CLIENT 'Weixin.exe'),(Join-Path $env:WECHATAGENT_BUILD_CLIENT ($env:WECHATAGENT_BUILD_VERSION+'\\Weixin.dll')))){if((Get-Item -LiteralPath $file).VersionInfo.FileVersion -ne $env:WECHATAGENT_BUILD_VERSION){throw 'Bundled WeChat version mismatch.'}; $signature=Get-AuthenticodeSignature -LiteralPath $file; if($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Tencent'){throw 'Bundled WeChat signature invalid.'}}`;
   const result=spawnSync(windowsPowerShellExecutable(),['-NoProfile','-NonInteractive','-Command',command],{windowsHide:true,encoding:'utf8',timeout:30000,env:{...windowsPowerShellEnvironment(),WECHATAGENT_BUILD_CLIENT:path.resolve(directory),WECHATAGENT_BUILD_VERSION:version}});
   if(result.status!==0)throw new Error('Bundled WeChat verification failed: '+(result.stderr||result.error?.message||result.stdout));
@@ -14,6 +14,14 @@ export function verifyWeChatClient(directory,version){
 // Fail before staging an installer if its native resource is stale or corrupt.
 export function verifyHookBuild(directory,version='4.1.10.27') {
   const build = JSON.parse(fs.readFileSync(path.join(directory, 'build.json'), 'utf8').replace(/^\uFEFF/, ''));
+  if(version==='4.2.0.12'){
+    if(build.targetVersion!==version||build.integration!=='WeChatAgent-1'||build.profile!=='4.2.0.12-stickers-v2'||build.nativeTextSend!==true||build.nativeImageSend!==true||build.nativeMentionSend!==true||build.nativeStickerSend!==true)throw new Error('4.2 Hook build profile mismatch.');
+    if(build.productionEnabled!==true||build.runtimeVerified!==true||build.acceptance?.coldStart!==true||build.acceptance?.textReceipt!==true||build.acceptance?.imageReceipt!==true||build.acceptance?.stickerReceipt!==true||build.acceptance?.animatedSticker!==true)throw new Error('4.2 runtime acceptance is required before packaging.');
+    for(const [file,expected]of [[`wechatagent-text-${version}.dll`,build.sha256],['wechatagent-text-loader.exe',build.loaderSha256]]){
+      if(crypto.createHash('sha256').update(fs.readFileSync(path.join(directory,file))).digest('hex')!==expected)throw new Error('4.2 native resource does not match build.json: '+file);
+    }
+    return build;
+  }
   if(version==='4.1.15.13'){
     if(build.targetVersion!==version||build.integration!=='WeChatAgent-1'||build.profile!=='4.1.15.13-media-mentions-v2'||build.nativeTextSend!==true||build.nativeImageSend!==true||build.nativeMentionSend!==true)throw new Error('Current Hook build profile mismatch.');
     for(const [file,expected] of [['wechatagent-text-4.1.15.13.dll',build.sha256],['wechatagent-text-loader.exe',build.loaderSha256]]){

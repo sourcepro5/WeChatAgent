@@ -166,7 +166,7 @@ export const hooks = {
 - after-response 额外收到 `ctx.text`；可返回 `{text:string}`，但必须声明并获授权 `reply`，并保留精确的 `SILENT` 或 `RESPOND:` 协议，否则不采用改写。
 - 钩子中的宿主 API 只允许读取存储、历史；不允许写存储、联网或申请发送。每插件每类钩子最多 800 毫秒，一类钩子总预算 2 秒，超时终止该插件并跳过，不阻塞本轮其他功能。
 - 可导出 `activate()`，只在启用后、子进程初始化时执行。启停通过独立进程创建/结束实现；不要依赖退出清理来保证数据正确。持久数据应在工具成功前通过 storage 写完。
-- 当前未提供 MCP 注册、前端任意 JavaScript 注入、任意路径文件操作和原生图片/文件发送 API。每日计划、受限模型生成与文档存储见下文；其他任务仍使用已有、已授权的 DSH 能力。
+- 当前未提供 MCP 注册、向控制台注入任意 JavaScript（插件自己的隔离页面见文末“自定义页面”）、任意路径文件操作和原生图片/文件发送 API。每日计划、受限模型生成与文档存储见下文；其他任务仍使用已有、已授权的 DSH 能力。
 
 插件在独立 Node 子进程运行，V8 旧生代堆上限为 96 MiB，并有执行时间限制（不是进程总内存硬上限）；宿主不向它传入模型账号密钥或完整环境变量。这是 **故障隔离，不是恶意代码的操作系统沙箱**。Node 代码仍可能直接访问本机文件或系统能力，因此只启用信任的插件。permissions 约束这里列出的宿主 API，不代表 Node 本身的完整权限封锁。
 
@@ -214,19 +214,30 @@ export function setup(api) {
 
 文档 id 为 1–120 个英文字母、数字、`_`、`-`，以字母或数字开头；拒绝 Windows 设备名、路径穿越和链接。若文档包含 id / conversationKey / accountScope，必须与当前目标一致。普通文档保存在 `state/plugin-documents/<账号作用域哈希>/<插件id>/<聊天哈希>/`。它和 256 KiB 键值存储分别管理；插件应自行控制历史数量，宿主不擅自删除旧文档。
 
-第一方 fish-notebook 的 `dataNamespace: "fish-notebook-v1"` 专供兼容旧的 `state/fish-notebook/`，不开放任意自定义数据路径，也不允许其他 id 读取该命名空间。
+第一方 fish-notebook 的 `dataNamespace: "fish-notebook-v1"` 专供兼容旧的 `state/fish-notebook/`，不开放任意自定义数据路径，也不允许其他 id 读取该命名空间。这是宿主中唯一按插件 id 绑定的地方：它保护已有日记数据的归属，不用于功能路由。
 
 模型 prompt 最多 32000 字符，maxTokens 为 16–2200，maxChars 为 1–4000，timeoutMs 为 1000–25000 毫秒。每次工具/动作最多 3 次独立模型请求，宿主最多同时处理 2 次；仍受外层工具 8 秒或动作 35 秒限制。支持关闭推理的模型会使用 off；计费及结果记入原聊天用量，不创建普通任务，也不改写主会话。生成和写文档会再次检查当前账号、授权及取消状态。不得把“独立请求”描述成没有模型费用。
 
 每日计划由宿主每分钟检查。后台服务停止、账号变化或当前任务繁忙时等待；到时对已允许的聊天调用 onSchedule。成功回执按账号/插件/聊天/日期保存，personaScoped 时还包含人设签名；处理失败 15 分钟后再试。返回 `{retryLater:true}` 不记为当天完成，例如当天尚无聊天。停止或卸载插件结束新执行，保留文档和调度回执。不要自行创建不受宿主管理的常驻定时器。
 
-鱼的记事本是完整示例，源码在 `optional-extensions/fish-notebook/`，包在 `release/plugins/fish-notebook-1.0.0.zip`；其原有前端由宿主提供兼容只读展示，不通过 ZIP 注入任意前端脚本。
+鱼的记事本是完整示例，源码在 `optional-extensions/fish-notebook/`，包在 `optional-extensions/packages/fish-notebook-1.1.1.zip`。日记列表和“写下今天”由包内的 `ui/page.html` 提供，通过自己的 `list`、`write-today` 动作读取和生成；宿主不再内置记事本页面或 `/api/fish-notebook` 接口。微信里的日记询问经下文的 `diary-question-v1` 交给它的 `ask` 动作。
+
+### 聊天能力路由
+
+部分宿主能力会把一类微信消息交给插件的固定动作处理。宿主不按插件 id 选择，只看声明：插件需在 `requiresHostFeatures` 中声明该能力（或申请能推导出它的权限）、获得下表权限，并注册同名动作。
+
+| 能力 | 宿主何时调用 | 动作与参数 | 所需权限 |
+| --- | --- | --- | --- |
+| `voice-input-v1` | 收到已授权聊天的微信语音 | `transcribe`，`{id}`；返回 `{ok,text}` 或 `{ok:false,code}` | `audio_read`（自动推导该能力） |
+| `diary-question-v1` | 宿主识别出询问“日记 / 记事本 / 小本本”的消息 | `ask`，`{id,viewer}`（均为 64 位十六进制）；返回 `{handled,text,document}` | `reply` |
+
+同一聊天只能有一个插件处理同一能力。语音有两个候选时返回 `VOICE_PLUGIN_CONFLICT`，并在这些插件卡片上提示；日记询问有两个候选时不交给插件，按普通聊天回复，并在 DSH 日志中记录。没有候选时语音返回 `VOICE_PLUGIN_DISABLED`，日记询问按普通聊天回复。最近一次真实语音结果按处理它的插件保存在 `state/plugin-service-checks/voice-input/<插件id>.json`。
 
 ## 打包、更新和卸载
 
 ### 可选语音输入能力
 
-`voice-input-v1` 是 API v2 的可选宿主扩展。声明 `audio_read` 以及所需宿主能力后，可在受控动作中读取当前原消息绑定的语音。普通模型工具、本机通用动作接口和钩子不会自动获得语音 id 的绑定。配套示例为 `optional-extensions/speech-recognition/`，完整链路见 [微信语音 API 转写](VOICE_INPUT.md)。示例通过自己配置的 POST API 转写；这不改变 `ctx.fetch` 原有的公开 GET 限制。插件直接网络请求受其自身超时控制，Node 代码仍属于可信代码。
+`voice-input-v1` 是 API v2 的可选宿主扩展。声明 `audio_read` 以及所需宿主能力后，可在受控动作中读取当前原消息绑定的语音。普通模型工具、本机通用动作接口和钩子不会自动获得语音 id 的绑定。配套示例为 `optional-extensions/speech-recognition/`，完整链路见 [微信语音 API 转写](VOICE_INPUT.md)。申请 `audio_read` 的插件页面可从 `wa.info().voice` 读取宿主的 WAV 转换组件状态和最近一次真实语音结果；插件卡片也只按真实语音结果显示状态。示例通过自己配置的 POST API 转写；这不改变 `ctx.fetch` 原有的公开 GET 限制。插件直接网络请求受其自身超时控制，Node 代码仍属于可信代码。
 
 项目提供校验打包命令：
 
@@ -268,6 +279,8 @@ Compress-Archive -Path '.\chat-notes\*' -DestinationPath '.\chat-notes-1.0.0.zip
 | POST /api/plugins/cancel | `{ticket}`，删除对应预览临时文件。 |
 | POST /api/plugins/:id | `{revision,enabled,permissions,chats,settings}`；chats:null 为全部已允许聊天，[] 为不分配。 |
 | POST /api/plugins/:id/uninstall | `{revision}`，归档代码，保留数据。 |
+| POST /api/plugins/:id/settings-actions/:action | `{packageRevision,args}`，运行 ui.json 中声明的设置动作（见“设置动作”），返回动作结果。 |
+| GET /api/plugins/:id/host-status | 申请 `audio_read` 的插件返回 `{voice:{decoder,lastAttempt}}`，其他插件返回 `{}`。 |
 
 预览 ticket 有效 10 分钟，同一控制台最多保留 4 份。提交使用插件配置 revision 检查冲突，409 时重新读取列表或重新选择 ZIP，不要强行覆盖。
 
@@ -280,7 +293,7 @@ Compress-Archive -Path '.\chat-notes\*' -DestinationPath '.\chat-notes-1.0.0.zip
 第一方 ZIP 重新生成使用 `npm run plugin:pack`；公开 Git 工作区的源码包使用 `npm run source:build`，先执行宿主及隐私校验，再生成来源哈希。Python 边界测试可通过环境变量 `WECHATAGENT_TEST_PYTHON` 指定解释器，避免依赖本机私有配置或占位的 `python` 命令。
 
 - ZIP 根目录或单层目录中含合法 plugin.json 和 index.mjs；没有 npm 安装步骤。
-- 安装后未启用时，不产生任何代码执行或网络请求。
+- 安装后未启用时，不产生任何代码执行或网络请求；唯一例外是用户在设置页勾选“允许此插件运行”后主动触发的设置动作。
 - 为一个聊天启用后能调用工具；其他聊天、账号和未授权发送者不越权。
 - 所有宿主 API 都 await，输出为可序列化且有界的结果。
 - 工具失败、超时、死循环、插件退出后，仍可继续发送普通文字。
@@ -288,3 +301,97 @@ Compress-Archive -Path '.\chat-notes\*' -DestinationPath '.\chat-notes-1.0.0.zip
 - README 写清功能、触发示例、权限用途、数据范围和版本要求，不声称整个 DSH/npm 插件直接兼容。
 
 维护者可运行：`node --test scripts/test-plugin-api.mjs`。完整便签示例见 [examples/plugins/chat-notes](../examples/plugins/chat-notes/)。
+
+
+## 可选的包内配置页面说明
+
+在 ZIP 根目录加入 `config-ui.json`，新版宿主会在每次打开设置时读取当前安装包中的描述；没有此文件的旧插件使用当前 `configSchema` 生成标准表单。旧宿主会忽略此文件，不影响原有动作、权限和配置字段。
+
+```json
+{
+  "version": 1,
+  "description": "填写服务连接信息。",
+  "sections": [
+    {"id": "basic", "title": "基本设置", "fields": ["endpoint", "apiKey"]},
+    {"id": "advanced", "title": "高级设置", "fields": ["timeoutMs"], "advanced": true}
+  ],
+  "fieldOptions": {
+    "endpoint": {"label": "服务地址", "placeholder": "粘贴平台提供的地址", "help": "保留平台要求的路径前缀。"}
+  }
+}
+```
+
+页面说明最多 32 KiB、8 个分区；字段必须来自插件的 `configSchema`，不能重复。未分组的字段仍会显示，避免丢失设置。`fieldOptions` 支持 `label`、`help`、`placeholder` 和与枚举一一对应的 `enumLabels`。不支持 HTML、脚本、远程资源、路径跳转或新的宿主权限；秘密字段仍由 Schema 的 `secret` 决定。说明不合法时回退标准表单，显示错误提示，不执行插件代码。
+
+`config-ui.json` 只描述分区和文案，不提供按插件 id 区分的控件或检测。旧版语音插件使用的 `widget` 与 `diagnostics` 字段已移除；仍声明它们的包会回退标准表单。需要模型下拉、连接测试等交互时，请改用下文的自定义设置页面和设置动作。
+
+更新 ZIP 后，页面按新包的说明与 Schema 重建。卸载会取消页面请求、销毁表单和监听器、清除检测状态；迟到回调不能重新打开旧页面。日记、插件文档等独立用户数据继续保留。首次使用此页面文件需要应用宿主加载器修复一次，后续布局与文案可以只更新 ZIP。
+
+## 自定义页面（沙箱 iframe）
+
+需要比自动表单更自由的界面时，插件可以自带 HTML/CSS/JS 页面。在 ZIP 根目录加入 `ui.json`，页面文件全部放在 `ui/` 目录：
+
+```text
+chat-notes/
+  plugin.json
+  index.mjs
+  ui.json
+  ui/settings.html   设置页面（替代自动表单）
+  ui/page.html       独立页面（插件卡片上的“打开”）
+  ui/*.js / *.css / 图片 / 字体
+```
+
+```json
+{
+  "version": 1,
+  "settings": {"entry": "settings.html", "height": 420},
+  "page": {"entry": "page.html", "title": "聊天小便签", "description": "按聊天查看和删除便签。"}
+}
+```
+
+- `settings` 与 `page` 至少声明一个；`entry` 是 `ui/` 下的相对路径，必须为已存在的 `.html`。`height` 为设置页初始高度（120–2000），使用 SDK 时会按内容自动调整。`title` 最多 40 字符，`description` 最多 200 字符。
+- `ui.json` 只由控制台读取，不改变 `plugin.json` 契约，也不需要重开 DSH；旧宿主会忽略它。声明无效或文件缺失时，显示提示并回退到标准表单。
+- 有设置页面时，宿主仍在页面上方显示启用开关、授权能力与聊天范围；插件页面只负责插件自己的设置字段。
+- `settings.actions`（可选，最多 8 个）列出设置页可调用的**设置动作**，例如读取模型、测试连接。它们必须同时在 `index.mjs` 中用 `registerAction` 注册。
+
+### 设置动作
+
+设置页需要联网测试或校验时，页面不能自己请求（`connect-src 'none'`），而是调用声明过的设置动作：
+
+```json
+{"version": 1, "settings": {"entry": "settings.html", "actions": ["models", "check"]}}
+```
+
+- 只能从本插件的设置页调用，且只在用户勾选宿主的“允许此插件运行”后执行（无需先保存、启用或分配聊天）。未声明的动作仍走下文的聊天动作规则。
+- 每次调用启动一个短时 Node 子进程，最长约 35 秒，结束即退出；同时最多 2 个。`ctx.mode` 为 `'settings'`，`ctx.settings` / `ctx.config()` 为**已保存**的设置（含秘密值）；没有聊天、账号、存储、文档、历史、语音、模型和回复等宿主服务，调用会报错。
+- 页面把未保存的草稿作为参数传入。秘密字段在页面中始终为空，约定空字符串表示“沿用已保存值”，由插件自己合并；返回值不要包含密钥。参数按动作的 `parameters` 校验，可直接复用 `configSchema`。
+- 结果不持久化在宿主中。安装、更新或卸载插件会取消仍在运行的设置动作。
+- 完整示例：`optional-extensions/speech-recognition/` 的 `ui/settings.js` 与 `lib/settings-actions.mjs`。
+
+### 运行环境与限制
+
+页面以 `sandbox="allow-scripts allow-forms"` 的 iframe 加载，服务器再以 CSP `sandbox` 强制成为隔离来源：
+
+- 只能加载本插件 `ui/` 下的脚本、样式、图片、字体和音频；**不能内联 `<script>`**，样式允许内联。
+- `connect-src 'none'`：不能 `fetch`/WebSocket，也不能访问控制台 `/api/*` 或令牌。需要联网时在 `index.mjs` 的动作里使用 `ctx.fetch` 或插件自己的网络请求。
+- 不能弹出窗口、跳转顶层页面、提交表单到其他地址、嵌套 iframe 或使用 Worker；没有 Cookie、localStorage 等持久存储，数据请通过动作写入 `ctx.storage` / `ctx.documents`。
+- 页面地址包含随控制台令牌和插件包变化的随机段，更新或卸载插件后旧页面立即失效。
+
+### SDK 与宿主接口
+
+在页面脚本中 `import wa from './__sdk.mjs'`（宿主提供，无需打包）。SDK 只是下列 postMessage 协议的封装，所有接口都绑定当前插件，不能指定其他插件：
+
+| SDK | 说明 |
+| --- | --- |
+| `await wa.info()` | `{pluginId, name, version, enabled, active, status, mode:'settings'\|'page', chats:[{key,name}], settingsActions, runAllowed}`。chats 为本插件已分配的聊天；settingsActions 为设置页可用的设置动作，runAllowed 表示打开时是否已勾选“允许此插件运行”。申请 `audio_read` 的插件另有 `voice:{decoder:{checked,decoder}, lastAttempt}` |
+| `await wa.settings.get()` | `{values, schema}`；秘密字段始终为空字符串 |
+| `await wa.settings.save(values)` | 只保存设置字段，按 configSchema 校验；秘密字段留空保留原值。不改变启用、权限和聊天范围 |
+| `await wa.actions.call(id, args, {key})` | 调用本插件 `registerAction` 注册的动作；key 必须是 chats 中的聊天（只有一个聊天时可省略）。插件需已启用并被 DSH 加载，最长约 35 秒。设置页调用 `settings.actions` 中的动作时不需要 key，见“设置动作” |
+| `wa.onCollect(fn)` | 设置页专用：用户点“保存插件设置”时调用 `fn({enabled})`（enabled 为保存后是否启用），返回要保存的设置对象，抛错则阻止保存并显示错误；可在其中调用不联网的设置动作做启用前校验，10 秒内需返回。未注册时保留已保存的设置 |
+| `wa.ui.resize(h)` / `wa.ui.autoResize(false)` | 设置页高度（120–2000）；默认按内容自动调整 |
+| `wa.ui.toast(text)` / `wa.ui.close()` | 显示宿主提示（最多 200 字符）；关闭设置窗口或离开独立页面 |
+| `wa.on('theme', fn)` | 设置页另有 `wa.on('run-allowed', fn)`：用户勾选或取消“允许此插件运行”时收到 `{runAllowed}`。主题变化事件。SDK 会自动设置 `html[data-theme]` 和 `--wa-bg`、`--wa-surface`、`--wa-text`、`--wa-muted`、`--wa-border`、`--wa-accent`、`--wa-on-accent`、`--wa-error`、`--wa-radius`、`--wa-body-font` 等 CSS 变量 |
+
+不使用 SDK 时，可直接与 `parent` 收发消息：页面请求 `{wa:1,type:'request',id,method,params}`，宿主回复 `{wa:1,type:'response',id,ok,result|error}`；宿主请求（如 `collect`）格式相同，由页面回复；宿主事件为 `{wa:1,type:'event',event,payload}`。方法名为 `host.info`、`settings.get`、`settings.save`（params `{values}`）、`actions.call`（params `{action,args,key}`）、`ui.resize`、`ui.toast`、`ui.close`。
+
+页面仍是本机可信代码的一部分：沙箱阻止它读取控制台和其他插件，但动作在 Node 子进程中运行，权限规则与前文一致。完整示例见 [examples/plugins/chat-notes](../examples/plugins/chat-notes/) 的 `ui/` 目录。

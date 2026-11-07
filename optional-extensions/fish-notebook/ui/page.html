@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="page.js"></script>
+</head>
+<body>
+  <div class="toolbar">
+    <label class="chat-field"><span>选择聊天的小本本</span>
+      <select id="chat" aria-label="选择聊天"></select>
+    </label>
+    <div class="buttons">
+      <button type="button" id="refresh">刷新</button>
+      <button type="button" id="write" class="primary">写下今天</button>
+    </div>
+  </div>
+  <p class="notice" id="notice" role="status" hidden></p>
+  <div class="layout">
+    <aside class="side">
+      <h2>鱼的记事本</h2>
+      <p class="subtle" id="summary">正在读取插件状态…</p>
+      <p>晚间整理时间（北京时间）：<strong id="write-time">—</strong></p>
+      <p class="subtle">模型按当前人格写日记，会使用模型额度。开关、时间和聊天范围在右上角“配置”中设置。</p>
+      <details>
+        <summary>微信怎么翻小本本</summary>
+        <p>发送“看看你的日记”等询问。前两次由模型按人格害羞回应，第三次分享当天日记；之后可直接看。</p>
+        <p>按账号、聊天、人格、日期及询问者分别计数。这里查看不计数。关闭或卸载保留旧日记。</p>
+        <p>提前写成后当晚不重复生成；没有当天聊天时不自动写，也不会主动将日记发送到微信。</p>
+      </details>
+    </aside>
+    <main class="pages">
+      <div id="entries"></div>
+      <nav class="paging" id="paging" hidden>
+        <span id="page-label"></span>
+        <div class="buttons">
+          <button type="button" id="prev">上一页</button>
+          <button type="button" id="next">下一页</button>
+        </div>
+      </nav>
+    </main>
+  </div>
+</body>
+</html>

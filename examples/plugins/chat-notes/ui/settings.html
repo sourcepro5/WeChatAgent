@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="settings.js"></script>
+</head>
+<body>
+  <h2>便签设置</h2>
+  <p class="hint">这一块由插件自己的页面提供。点下方“保存插件设置”时，宿主会向页面收集这里的值。</p>
+  <label><span>每个聊天最多保留 <output id="value">20</output> 条便签</span>
+    <input id="max-notes" type="range" min="1" max="50" step="1">
+  </label>
+  <p class="error" id="error" role="alert"></p>
+</body>
+</html>

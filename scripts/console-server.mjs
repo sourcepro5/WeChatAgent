@@ -1,7 +1,10 @@
+import {pluginConfigUi} from './plugin-config-ui.mjs';
+import {createPluginUiHost,pluginUiHeaders} from './plugin-ui.mjs';
+import {inspectWeChatClient} from './wechat-client-selection.mjs';
 import {feedbackSnapshot,saveFeedback} from '../packages/dsh-social-bridge-plugin/assistant-feedback.mjs';
 import {createMemoryConsole} from './memory-console.mjs';
-import {fishNotebookSnapshot} from './fish-notebook-console.mjs';
-import {createSpeechPluginConsole} from './speech-plugin-console.mjs';
+import {createSettingsActionRunner} from './plugin-settings-actions.mjs';
+import {createVoiceHostStatus} from './voice-host-status.mjs';
 import fs from 'node:fs';
 import {createPersonaCategories} from './persona-categories.mjs';
 import {createUpdateChecker} from './update-check.mjs';
@@ -19,6 +22,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { validateConfig, projectRoot } from './project-config.mjs';
+import { withoutLiveSettings } from '../public/console/layout-model.mjs';
 import { conversationId } from './hook-onebot.mjs';
 import { runConsoleCommand, taskFailureMessage, windowsPowerShellEnvironment, windowsPowerShellExecutable } from './console-process.mjs';
 import { personaError,personaReferences } from '../public/console/persona-files.mjs';
@@ -52,7 +56,7 @@ export function validateConsoleConfig(config, root) {
     const translations = [
       [/distinct|ports|Required ports/, '端口必须为 1024–65535 的整数，且不能互相重复。'],
       [/loopback/, '发送后端地址必须是本机回环 HTTP 地址。'],
-      [/matching|version/, '发送组件需要匹配版本 4.1.10.27 的微信程序。'],
+      [/matching|version/, '请选择受支持且与发送组件匹配的微信版本及程序。'],
       [/persona/, '人格名称不能包含路径、点号前缀或无效字符。'],
       [/OneBot IDs/, '聊天 ID 必须是有效的正整数。'],
       [/nicknames|Python/, '请填写 Python 程序位置与至少一个账号昵称。'],
@@ -90,11 +94,11 @@ export function validateConsoleConfig(config, root) {
 }
 
 import {allowedConversation,validateConversationSettings,conversationWorkMode} from '../packages/dsh-social-bridge-plugin/conversation-policy.mjs';
-export function createConsole({ root = projectRoot, port = 3210, runner, readerSetup = runReaderSetup, accountVerifier = verifyWeChatAccount, fetchImpl = fetch, nodeExecutable = process.execPath, filePicker, onQuit, processProbe, processStop, speechCapabilities } = {}) {
+export function createConsole({ root = projectRoot, port = 3210, runner, readerSetup = runReaderSetup, accountVerifier = verifyWeChatAccount, fetchImpl = fetch, nodeExecutable = process.execPath, filePicker, onQuit, processProbe, processStop, voiceCapabilities, wechatClientInspector = inspectWeChatClient } = {}) {
   const updates=createUpdateChecker({root,fetchImpl});
   const publicDir = path.join(projectRoot, 'public', 'console');
   const pluginInstaller=new PluginInstaller(root);
-  const speechChecks=createSpeechPluginConsole({root,fetchImpl,...(speechCapabilities?{readCapabilities:speechCapabilities}:{})});
+  const voiceStatus=createVoiceHostStatus({root,...(voiceCapabilities?{readCapabilities:voiceCapabilities}:{})});
   const personaCategories=createPersonaCategories(root);
   const categorySnapshot=()=>{try{return personaCategories.read();}catch(error){return {categories:[],assignments:{},revision:null,error:error.message};}};
   const configFile = path.join(root, 'config', 'wechatagent.json');
@@ -104,6 +108,8 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
   const readerRevision = () => hash(JSON.stringify(optionalJson(readerFile)));
   const readerVerified = () => optionalJson(preferenceFile).readerVerifiedRevision === readerRevision();
   const csrf = crypto.randomBytes(32).toString('hex');
+  const pluginPages = createPluginUiHost({root, secret: csrf});
+  const settingsActions=createSettingsActionRunner({root,describe:item=>pluginPages.describe(item)});
   const jobs = new Map(); let activeJob = null; let latestJob = null; let protectingCredential = false;
   let processRecoveryBusy=false;
   let shutdownPromise=null,shuttingDown=false;
@@ -182,7 +188,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     if(body===undefined)return remote(`http://127.0.0.1:${config.ports.dshPlugin}${route}`, token, 5000);
     const response=await fetchImpl(`http://127.0.0.1:${config.ports.dshPlugin}${route}`,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(60000)});
     const result=await response.json();
-    if(!response.ok){const messages={ACCOUNT_SWITCH_REQUIRES_DSH_RESTART:'微信账号已切换，请重开 DSH 后重试。',session_busy:'此聊天正在回复，请等待完成后再修复。',HISTORY_REPAIR_SESSION_CHANGED:'当前会话已变化，请刷新后重试。',HISTORY_REPAIR_CHAT_NOT_ALLOWED:'聊天范围已变化，请刷新后重试。',HISTORY_REPAIR_CONFIRM_REQUIRED:'请先确认修复这个聊天的上下文。',HISTORY_REPAIR_UNAVAILABLE:'此会话不使用原生人格前缀，无需执行此项修复。',HISTORY_ACCOUNT_CHANGED:'微信账号已切换，请重开 DSH 后重试。',HISTORY_NATIVE_PREFIX_UNAVAILABLE:'DSH 提示词服务尚未就绪，请完整退出并重新打开 DSH。',SESSION_GROUP_SERVICE_UNAVAILABLE:'DSH 工作区服务尚未就绪，请从托盘完整退出并重开 DSH。',SESSION_GROUP_INVALID_NAME:'分组名称需要 1–60 个字符。',SESSION_GROUP_INVALID_PATH:'请选择一个已存在、可访问的完整目录。',SESSION_GROUP_CHANGED:'工作区列表已变化，请刷新会话页面后重试。',SESSION_GROUP_NOT_FOUND:'工作区已被移除，请刷新后重新选择。',SESSION_GROUP_DUPLICATE_NAME:'DSH 中已有同名工作区，请换一个名称。',SESSION_GROUP_NOT_EMPTY:'此工作区仍有未归档的 DSH 会话，请先移走它们。',SESSION_GROUP_SESSION_BUSY:'此聊天正在回复或维护，请稍后再移动。',SESSION_GROUP_SESSION_CHANGED:'当前会话已变化，请刷新后重新移动。',SESSION_GROUP_ACCOUNT_CHANGED:'微信账号已切换，请重开 DSH 后重试。',SESSION_GROUP_CHAT_NOT_ALLOWED:'请选择聊天范围中已保存的聊天。',SESSION_GROUP_CONFIRM_REQUIRED:'请确认跨目录移动时保留历史的方式。',SESSION_GROUP_SOURCE_UNAVAILABLE:'原会话的工作目录无法访问，请恢复该目录后再移动。'};throw fault(messages[result.error]??(route==='/repair-context'?(messages[result.detail]??'上下文修复未完成，原会话已保留。请检查 DSH 运行日志。'):route.startsWith('/plugin-actions/')||route.startsWith('/fish-notebook/')?'插件操作暂未完成，请检查插件授权并确认 DSH 已加载新版宿主。':'工作区操作未完成，原会话仍保留。请检查 DSH 运行日志后重试。'),[400,404,409].includes(response.status)?response.status:503);}
+    if(!response.ok){const messages={ACCOUNT_SWITCH_REQUIRES_DSH_RESTART:'微信账号已切换，请重开 DSH 后重试。',session_busy:'此聊天正在回复，请等待完成后再修复。',HISTORY_REPAIR_SESSION_CHANGED:'当前会话已变化，请刷新后重试。',HISTORY_REPAIR_CHAT_NOT_ALLOWED:'聊天范围已变化，请刷新后重试。',HISTORY_REPAIR_CONFIRM_REQUIRED:'请先确认修复这个聊天的上下文。',HISTORY_REPAIR_UNAVAILABLE:'此会话不使用原生人格前缀，无需执行此项修复。',HISTORY_ACCOUNT_CHANGED:'微信账号已切换，请重开 DSH 后重试。',HISTORY_NATIVE_PREFIX_UNAVAILABLE:'DSH 提示词服务尚未就绪，请完整退出并重新打开 DSH。',SESSION_GROUP_SERVICE_UNAVAILABLE:'DSH 工作区服务尚未就绪，请从托盘完整退出并重开 DSH。',SESSION_GROUP_INVALID_NAME:'分组名称需要 1–60 个字符。',SESSION_GROUP_INVALID_PATH:'请选择一个已存在、可访问的完整目录。',SESSION_GROUP_CHANGED:'工作区列表已变化，请刷新会话页面后重试。',SESSION_GROUP_NOT_FOUND:'工作区已被移除，请刷新后重新选择。',SESSION_GROUP_DUPLICATE_NAME:'DSH 中已有同名工作区，请换一个名称。',SESSION_GROUP_NOT_EMPTY:'此工作区仍有未归档的 DSH 会话，请先移走它们。',SESSION_GROUP_SESSION_BUSY:'此聊天正在回复或维护，请稍后再移动。',SESSION_GROUP_SESSION_CHANGED:'当前会话已变化，请刷新后重新移动。',SESSION_GROUP_ACCOUNT_CHANGED:'微信账号已切换，请重开 DSH 后重试。',SESSION_GROUP_CHAT_NOT_ALLOWED:'请选择聊天范围中已保存的聊天。',SESSION_GROUP_CONFIRM_REQUIRED:'请确认跨目录移动时保留历史的方式。',SESSION_GROUP_SOURCE_UNAVAILABLE:'原会话的工作目录无法访问，请恢复该目录后再移动。'};throw fault(messages[result.error]??(route==='/repair-context'?(messages[result.detail]??'上下文修复未完成，原会话已保留。请检查 DSH 运行日志。'):route.startsWith('/plugin-actions/')?'插件操作暂未完成，请检查插件授权并确认 DSH 已加载新版宿主。':'工作区操作未完成，原会话仍保留。请检查 DSH 运行日志后重试。'),[400,404,409].includes(response.status)?response.status:503);}
     return result;
   }
   function buffered() {
@@ -220,7 +226,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       const services = [
         { id: 'reader', label: '微信读取', ready: readerReady, detail: readerReady ? '数据库可读，消息同步正常' : readerState?.lastError ? '读取异常，请重新连接并验证' : readerFailureDetail(), port: config.ports.weflow },
         { id: 'bridge', label: '消息桥接', ready: bridgeReady && hookReady && adapter?.reader_connected === true, detail: bridgeReady && hookReady && adapter?.reader_connected ? '收发连接正常，账号已核验' : !hookReady ? '等待匹配微信登录与发送连接' : '等待消息桥接连接', port: config.ports.adapter },
-        { id: 'dsh', label: '模型连接', ready: dshReady, detail: dshReady ? 'DSH 插件已连接' : '打开 DSH 并启用本项目插件', port: config.ports.dshPlugin },
+        { id: 'dsh', label: '模型连接', ready: dshReady, detail: dshReady ? 'DSH 插件已连接' : '打开 DSH（负责调用模型的桌面程序）并启用本项目插件', port: config.ports.dshPlugin },
       ];
       const running = !!readerState || !!adapter || !!value(4);
       return { ready, running, services, lastError: safeText(adapter?.last_error ?? ''),
@@ -256,7 +262,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     const file = path.join(root, 'state', 'logs', 'reader.stderr.log');
     if (!fs.existsSync(file)) return '请在首次配置中连接并验证微信';
     const output = fs.readFileSync(file, 'utf8').slice(-8000);
-    return output.trim() ? taskFailureMessage(output, 1) : '等待读取服务启动';
+    return output.trim() ? taskFailureMessage(output, 1, { inline: true }) : '等待读取服务启动';
   }
   function readerRequest(body) {
     if (body.revision !== readerRevision()) throw fault('读取配置已变化，请重新载入后再连接。', 409);
@@ -367,25 +373,31 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     });
   }
   const server = http.createServer(async (req, res) => {
-    const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" };
+    const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" };
     const reply = (status, body, type = 'application/json; charset=utf-8') => { res.writeHead(status, { ...headers, 'Content-Type': type }); res.end(type.startsWith('application/json') ? JSON.stringify(body) : body); };
     try {
       const boundPort = server.address()?.port ?? port;
       const expectedHost = `127.0.0.1:${boundPort}`;
       if (req.headers.host !== expectedHost) throw fault('请通过本机控制台地址访问。', 403);
       const origin = `http://${expectedHost}`;
-      if ((req.headers.origin && req.headers.origin !== origin) || req.headers['sec-fetch-site'] === 'cross-site') throw fault('不允许其他网站访问本机控制台。', 403);
       const url = new URL(req.url, origin);
       const route = url.pathname;
+      // Sandboxed plugin pages have an opaque origin, so their own subresource
+      // loads arrive as Origin: null / cross-site. Only these static GETs are exempt.
+      if (req.method === 'GET' && route.startsWith('/plugin-ui/')) {
+        if (req.headers.origin && !['null', origin].includes(req.headers.origin)) throw fault('不允许其他网站访问本机控制台。', 403);
+        const page = pluginPages.resolve(route);
+        if (!page) return reply(404, { error: '页面不存在。' });
+        res.writeHead(200, pluginUiHeaders(origin, page.base, page.type)); res.end(fs.readFileSync(page.file)); return;
+      }
+      if ((req.headers.origin && req.headers.origin !== origin) || req.headers['sec-fetch-site'] === 'cross-site') throw fault('不允许其他网站访问本机控制台。', 403);
       if (req.method === 'GET' && !route.startsWith('/api/')) {
         if(route==='/plugin-contract.mjs')return reply(200,fs.readFileSync(path.join(projectRoot,'packages/plugin-api/contract.mjs'),'utf8'),'text/javascript; charset=utf-8');
-        if(route==='/speech-settings.mjs')return reply(200,fs.readFileSync(path.join(publicDir,'speech-settings.mjs'),'utf8'),'text/javascript; charset=utf-8');
         if(route==='/plugin-api.md'){res.writeHead(200,{'Content-Type':'text/plain; charset=utf-8','Content-Disposition':'attachment; filename="WeChatAgent-plugin-api-v2.md"','X-Content-Type-Options':'nosniff'});res.end(fs.readFileSync(path.join(projectRoot,'docs/PLUGIN_DEVELOPMENT.md')));return;}
-        if(route==='/plugin-example.zip'){const example=path.join(projectRoot,'examples/plugins/chat-notes');inspectPackage(example);res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="chat-notes-1.0.0.zip"','X-Content-Type-Options':'nosniff'});res.end(packZip(packageFiles(example)));return;}
-        if(route==='/plugin-packages/fish-notebook.zip'){const source=path.join(projectRoot,'optional-extensions/fish-notebook');inspectPackage(source);res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="fish-notebook-1.0.0.zip"','X-Content-Type-Options':'nosniff'});res.end(packZip(packageFiles(source)));return;}
+        if(route==='/plugin-example.zip'){const example=path.join(projectRoot,'examples/plugins/chat-notes');inspectPackage(example);res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="chat-notes-1.1.0.zip"','X-Content-Type-Options':'nosniff'});res.end(packZip(packageFiles(example)));return;}
         const assets = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/console.css': ['console.css', 'text/css; charset=utf-8'], '/console.js': ['console.js', 'text/javascript; charset=utf-8'], '/persona-files.mjs': ['persona-files.mjs', 'text/javascript; charset=utf-8'], '/appearance.js': ['appearance.js', 'text/javascript; charset=utf-8'], '/appearance.css': ['appearance.css', 'text/css; charset=utf-8'], '/icons.svg': ['icons.svg', 'image/svg+xml'], '/app-icon.png': ['app-icon.png', 'image/png'], '/favicon.svg': ['app-icon.png', 'image/png'] };
         assets['/extension-market.js']=['extension-market.js','text/javascript; charset=utf-8'];assets['/extension-market.css']=['extension-market.css','text/css; charset=utf-8'];
-        assets['/plugins.js']=['plugins.js','text/javascript; charset=utf-8'];assets['/plugins.css']=['plugins.css','text/css; charset=utf-8'];
+        assets['/plugin-config-ui.mjs']=['plugin-config-ui.mjs','text/javascript; charset=utf-8'];assets['/plugin-frame.mjs']=['plugin-frame.mjs','text/javascript; charset=utf-8'];assets['/plugins.js']=['plugins.js','text/javascript; charset=utf-8'];assets['/plugins.css']=['plugins.css','text/css; charset=utf-8'];
         assets['/external-links.js']=['external-links.js','text/javascript; charset=utf-8'];
         assets['/sticker-manager.js']=['sticker-manager.js','text/javascript; charset=utf-8'];assets['/sticker-manager.css']=['sticker-manager.css','text/css; charset=utf-8'];
         assets['/updates.js']=['updates.js','text/javascript; charset=utf-8'];
@@ -393,7 +405,6 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
         assets['/workspace-layout.css']=['workspace-layout.css','text/css; charset=utf-8'];
         assets['/assistant-feedback.js']=['assistant-feedback.js','text/javascript; charset=utf-8'];
         assets['/memory-view.js']=['memory-view.js','text/javascript; charset=utf-8'];assets['/memory-view.css']=['memory-view.css','text/css; charset=utf-8'];
-        assets['/fish-notebook.js']=['fish-notebook.js','text/javascript; charset=utf-8'];assets['/fish-notebook.css']=['fish-notebook.css','text/css; charset=utf-8'];
         assets['/conversation-settings.mjs']=['conversation-settings.mjs','text/javascript; charset=utf-8'];
         assets['/dsh-catalog.mjs']=['dsh-catalog.mjs','text/javascript; charset=utf-8'];
         assets['/persona-delete.js']=['persona-delete.js','text/javascript; charset=utf-8'];
@@ -403,16 +414,21 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
         assets['/process-recovery.js']=['process-recovery.js','text/javascript; charset=utf-8'];assets['/process-recovery.css']=['process-recovery.css','text/css; charset=utf-8'];
         assets['/motion.js']=['motion.js','text/javascript; charset=utf-8'];assets['/motion.css']=['motion.css','text/css; charset=utf-8'];
         assets['/liquid-glass.js']=['liquid-glass.js','text/javascript; charset=utf-8'];assets['/liquid-glass.css']=['liquid-glass.css','text/css; charset=utf-8'];
+        assets['/theme-presets.js']=['theme-presets.js','text/javascript; charset=utf-8'];assets['/theme-presets.css']=['theme-presets.css','text/css; charset=utf-8'];
         assets['/dsh-access.js']=['dsh-access.js','text/javascript; charset=utf-8'];assets['/extensions.js']=['extensions.js','text/javascript; charset=utf-8'];
         if (!assets[route]) return reply(404, { error: '页面不存在。' });
-        const [file, type] = assets[route]; return reply(200, fs.readFileSync(path.join(publicDir, file)), type);
+        // 静态文件允许浏览器缓存，但每次都向服务器校验（no-cache + ETag）：文件未修改时返回 304，
+        // 不再每次启动都整份重新下载；ETag 由文件大小与修改时间组成，修改后立即生效。接口仍为 no-store。
+        const [file, type] = assets[route]; const filePath = path.join(publicDir, file); const stat = fs.statSync(filePath);
+        const etag = `W/"${stat.size.toString(36)}-${Math.trunc(stat.mtimeMs).toString(36)}"`;
+        if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ...headers, 'Cache-Control': 'no-cache', ETag: etag }); res.end(); return; }
+        res.writeHead(200, { ...headers, 'Cache-Control': 'no-cache', ETag: etag, 'Content-Type': type }); res.end(fs.readFileSync(filePath)); return;
       }
       if (req.method === 'GET' && route === '/api/info') return reply(200, { project: 'WeChatAgent Console', root, version: 1, token: csrf });
       if (req.headers['x-console-token'] !== csrf) throw fault('控制台连接已更新，请刷新页面。', 401);
       if(req.method==='GET'&&route==='/api/updates')return reply(200,await updates.check());
       if(req.method==='GET'&&route==='/api/assistant-feedback')return reply(200,feedbackSnapshot(root));
       if(req.method==='GET'&&route==='/api/memory')return reply(200,memoryView.overview());
-      if(req.method==='GET'&&route==='/api/fish-notebook')return reply(200,fishNotebookSnapshot(root,snapshot(),url.searchParams));
       if(req.method==='GET'&&route==='/api/memory/members')return reply(200,memoryView.members(url.searchParams));
       if(req.method==='GET'&&route==='/api/memory/summaries')return reply(200,await memoryView.summaries(url.searchParams));
       if (req.method === 'GET' && route === '/api/config') return reply(200, { ...snapshot(), ...optionalJson(preferenceFile) });
@@ -425,11 +441,13 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       }
       if(req.method==='GET'&&route==='/api/dsh-catalog'){const key=url.searchParams.get('conversationKey');if(key&&!allowedConversation(snapshot().config.wechat,key))throw fault('请先保存聊天范围。');return reply(200,await plugin('/dsh-catalog'+(key?'?conversationKey='+encodeURIComponent(key):'')));}
       if(req.method==='GET'&&route==='/api/meme-library-status'){try{return reply(200,await plugin('/meme-library/status'));}catch{return reply(200,{available:false,installed:false,reason:'DSH_PLUGIN_UNAVAILABLE'});}}
+      const hostStatus=req.method==='GET'&&/^\/api\/plugins\/([a-z][a-z0-9-]{0,39})\/host-status$/.exec(route);
+      if(hostStatus){const item=scanPlugins(root).find(item=>item.id===hostStatus[1]&&!item.invalid);if(!item)throw fault('插件已卸载或清单无效。',404);return reply(200,item.permissions.includes('audio_read')?{voice:await voiceStatus.status(item.id)}:{});}
       if(req.method==='GET'&&(route==='/api/extensions'||route==='/api/plugins')){
         const saved=snapshot();let connected=false,runtime=[],pluginApiReady=false,live=null;
         try{live=await plugin('/health');connected=!!live.ok;pluginApiReady=live.pluginRuntime===HOST_RUNTIME;if(pluginApiReady)runtime=(await plugin('/extensions')).extensions??[];}catch{}
         const catalog=runtimeCatalog(pluginCatalog(root,runtime),live);
-        for(const item of catalog.plugins)if(item.id==='speech-recognition')item.serviceStatus=speechChecks.status();
+        for(const item of catalog.plugins){Object.assign(item,pluginConfigUi(root,item),pluginPages.describe(item));if(item.requestedPermissions?.includes('audio_read'))item.serviceStatus=voiceStatus.card(item.id);}
         if(route==='/api/plugins')return reply(200,catalog);
         return reply(200,{...builtinCatalog(saved.config,saved.revision,connected),plugins:catalog.plugins,pluginRevision:catalog.revision,pluginError:catalog.error??null,canInstallZip:true,pluginApiReady});
       }
@@ -506,30 +524,24 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       if(route==='/api/updates/check')return reply(200,await updates.check({force:true}));
       if (route === '/api/jobs') return reply(202, startJob(body));
       assertIdle();
-      if(route==='/api/plugins/inspect'){const result=pluginInstaller.inspect(body);let live=null;try{live=await plugin('/health');}catch{}return reply(200,{...result,compatibility:hostCompatibility(result.plugin,live)});}
-      if(route==='/api/plugins/install')return reply(200,pluginInstaller.install(body));
+      if(route==='/api/plugins/inspect'){const result=pluginInstaller.inspect(body);let live=null;try{live=await plugin('/health');}catch{}const staged=pluginInstaller.tickets.get(result.ticket)?.folder;return reply(200,{...result,hasPages:!!staged&&fs.existsSync(path.join(staged,'ui.json')),compatibility:hostCompatibility(result.plugin,live)});}
+      if(route==='/api/plugins/install'){const result=pluginInstaller.install(body);pluginPages.revoke(result.id);settingsActions.cancel(result.id);return reply(200,result);}
       if(route==='/api/plugins/cancel')return reply(200,pluginInstaller.cancel(body.ticket));
-      const speechOperation=/^\/api\/plugins\/speech-recognition\/(models|check)$/.exec(route);
-      if(speechOperation){
+      const settingsAction=/^\/api\/plugins\/([a-z][a-z0-9-]{0,39})\/settings-actions\/([a-z][a-z0-9-]{0,19})$/.exec(route);
+      if(settingsAction){
         const controller=new AbortController(),closed=()=>{if(!res.writableEnded)controller.abort();};res.once('close',closed);
-        try{return reply(200,await speechChecks.run(speechOperation[1],body,{signal:controller.signal}));}
+        try{return reply(200,await settingsActions.run(settingsAction[1],settingsAction[2],body,{signal:controller.signal}));}
         catch(error){if(controller.signal.aborted||res.destroyed)return;throw error;}
         finally{res.removeListener('close',closed);}
       }
       const pluginRoute=/^\/api\/plugins\/([a-z][a-z0-9-]{0,39})(\/uninstall)?$/.exec(route);
       if(pluginRoute){
-        if(!pluginRoute[2]&&pluginRoute[1]==='speech-recognition')await speechChecks.validateForSave(body);
+        if(body.packageRevision!==undefined){const item=scanPlugins(root).find(item=>item.id===pluginRoute[1]);if(item?.revision!==body.packageRevision)throw fault('插件包已变化，请重新打开配置页。',409);}
         if(!pluginRoute[2]&&body.enabled===true){let live=null;try{live=await plugin('/health');}catch{}const item=scanPlugins(root).find(item=>item.id===pluginRoute[1]&&!item.invalid);if(item&&live){const compatibility=hostCompatibility(item,live);if(!compatibility.compatible)throw fault(compatibility.reason,409);}}
-        const result=pluginRoute[2]?archivePlugin(root,pluginRoute[1],body.revision):updatePlugin(root,pluginRoute[1],body);if(!pluginRoute[2]&&pluginRoute[1]==='speech-recognition')speechChecks.onSaved();return reply(200,{ok:true,revision:result.revision});
+        const result=pluginRoute[2]?archivePlugin(root,pluginRoute[1],body.revision):updatePlugin(root,pluginRoute[1],body);if(pluginRoute[2]){pluginPages.revoke(pluginRoute[1]);settingsActions.cancel(pluginRoute[1]);}return reply(200,{ok:true,revision:result.revision});
       }
       const pluginAction=/^\/api\/plugins\/([a-z][a-z0-9-]{0,39})\/actions\/([a-z][a-z0-9-]{0,19})$/.exec(route);
       if(pluginAction){if(!allowedConversation(snapshot().config.wechat,body.key))throw fault('请选择已允许的聊天。',403);return reply(200,await plugin('/plugin-actions/'+pluginAction[1]+'/'+pluginAction[2],{conversationKey:body.key,args:body.args??{}}));}
-      if(route==='/api/fish-notebook/settings'||route==='/api/fish-notebook/write'){
-        const previous=snapshot(),params=new URLSearchParams({scope:String(body.scope??''),...(body.key?{conversationKey:body.key}:{})}),current=fishNotebookSnapshot(root,previous,params);
-        if(!current.available||!body.scope)throw fault('请先连接微信并刷新记事本。',409);
-        if(route==='/api/fish-notebook/write'){if(!current.effectiveEnabled)throw fault('请先安装并为此聊天启用鱼的记事本插件。');const result=await plugin('/fish-notebook/write',{conversationKey:current.conversationKey});if(!result.ok)throw fault('日记暂未写成，请确认 DSH 已加载新版插件宿主后重试。',503);return reply(200,{ok:true});}
-        throw fault('鱼的记事本已改为可选插件，请在插件配置中设置开关、时间和聊天范围。',410);
-      }
       if(['/api/sticker-manager/import','/api/sticker-manager/edit','/api/sticker-manager/delete'].includes(route))return reply(200,await stickerManager('/'+route.split('/').at(-1),body));
       if(/^\/api\/session-groups\/(create|rename|delete|move)$/.test(route))return reply(200,await plugin(route.slice('/api'.length),body));
       if(route==='/api/group-bindings'){
@@ -593,29 +605,37 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       if (route === '/api/config') {
         const previous = snapshot();
         if (body.revision !== previous.revision) throw fault('配置已在其他窗口更新，请重新载入后再保存。', 409);
-        const config = validateConsoleConfig(body.config, root);
+        const candidate=structuredClone(body.config);
+        const hookChanged=candidate?.hook?.wechatExecutable!==previous.config.hook.wechatExecutable||candidate?.hook?.expectedVersion!==previous.config.hook.expectedVersion;
+        if(hookChanged){
+          const selected=await wechatClientInspector({root,executable:candidate?.hook?.wechatExecutable});
+          if(res.destroyed)return;
+          assertIdle();
+          if(snapshot().revision!==previous.revision)throw fault('配置已在检查微信程序期间变化，请刷新后重试。',409);
+          candidate.hook.wechatExecutable=selected.path;candidate.hook.expectedVersion=selected.version;
+        }
+        const config = validateConsoleConfig(candidate, root);
         if (Object.values(config.ports).includes(boundPort) || Number(new URL(config.hook.baseUrl).port || 80) === boundPort) throw fault('服务端口不能与当前控制台端口重复。');
         backup(configFile); atomic(configFile, config);
-        const withoutStickers=value=>{const copy=structuredClone(value);delete copy.wechat.fishNotebook;delete copy.wechat.replyLayout;delete copy.wechat.stickers;delete copy.wechat.search;delete copy.wechat.webReader;delete copy.wechat.proactive;delete copy.wechat.context;delete copy.wechat.chatModes;delete copy.wechat.dshAccess;delete copy.wechat.memeLibrary;delete copy.wechat.assistant;return copy;};
-        if(JSON.stringify(withoutStickers(previous.config))!==JSON.stringify(withoutStickers(config)))markPending(JSON.stringify(previous.config.dsh) !== JSON.stringify(config.dsh) || previous.config.ports.dshPlugin !== config.ports.dshPlugin);
+        if(JSON.stringify(withoutLiveSettings(previous.config))!==JSON.stringify(withoutLiveSettings(config)))markPending(JSON.stringify(previous.config.dsh) !== JSON.stringify(config.dsh) || previous.config.ports.dshPlugin !== config.ports.dshPlugin);
         return reply(200, { ...snapshot(), ...optionalJson(preferenceFile) });
       }
       if(route==='/api/assistant-feedback')return reply(200,saveFeedback(root,body));
       if (route === '/api/persona-categories') return reply(200,personaCategories.update(body));
       if (route === '/api/roles/delete') {
-        if(personaError(body.name,'check'))throw fault('请选择有效的人设卡，不能删除说明文件或文件路径。');
-        if(body.confirmed!==true)throw fault('请先确认删除人设卡。',409);
+        if(personaError(body.name,'check'))throw fault('请选择有效的人格，不能删除说明文件或文件路径。');
+        if(body.confirmed!==true)throw fault('请先确认删除人格。',409);
         const directory=path.join(root,'roles');
-        if(!fs.existsSync(directory))throw fault('人设卡已不存在，请刷新后重试。',404);
-        if(fs.lstatSync(directory).isSymbolicLink())throw fault('人设目录为链接，不能通过此入口删除。');
+        if(!fs.existsSync(directory))throw fault('人格已不存在，请刷新后重试。',404);
+        if(fs.lstatSync(directory).isSymbolicLink())throw fault('人格目录为链接，不能通过此入口删除。');
         const filename=fs.readdirSync(directory).find(name=>name.toLocaleLowerCase()===(body.name+'.md').toLocaleLowerCase());
-        if(!filename)throw fault('人设卡已不存在，请刷新后重试。',404);
+        if(!filename)throw fault('人格已不存在，请刷新后重试。',404);
         const name=filename.slice(0,-3),file=path.join(directory,filename),stat=fs.lstatSync(file);
-        if(!stat.isFile()||stat.isSymbolicLink())throw fault('此人设不是普通文件，不能删除。');
-        if(body.revision!==hash(fs.readFileSync(file,'utf8')))throw fault('人设卡已被修改，请重新载入后再删除。',409);
+        if(!stat.isFile()||stat.isSymbolicLink())throw fault('此人格不是普通文件，不能删除。');
+        if(body.revision!==hash(fs.readFileSync(file,'utf8')))throw fault('人格已被修改，请重新载入后再删除。',409);
         const references=personaReferences(snapshot().config.persona,name,snapshot().config.wechat.modeSettings);
-        if(references.default)throw fault('此人设是默认人设，请先切换默认人设并保存设置。',409);
-        if(references.chats.length)throw fault('有聊天正在使用此人设，请先切换聊天人设并保存设置。',409);
+        if(references.default)throw fault('此人格是默认人格，请先切换默认人格并保存设置。',409);
+        if(references.chats.length)throw fault('有聊天正在使用此人格，请先切换聊天人格并保存设置。',409);
         backup(file);
         const marker=deletedPersonaFile(name),previous=fs.existsSync(marker)?fs.readFileSync(marker,'utf8'):null;
         atomic(marker,{version:1,name});
@@ -636,6 +656,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
         markPending();
         return reply(200, { ok: true, revision: hash(body.content), categories: categorySnapshot() });
       }
+      if(route==='/api/wechat-client')return reply(200,await wechatClientInspector({root,executable:body.path}));
       if (route === '/api/browse') {
         if (!['exe', 'folder', 'workspace'].includes(body.kind)) throw fault('无效的文件类型。');
         return reply(200, { path: filePicker ? await filePicker(body.kind) : await nativeHelper(body.kind) });
@@ -694,7 +715,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     };
     listen();
   });
-  server.on('close',()=>{pluginInstaller.dispose();speechChecks.close();});
+  server.on('close',()=>{pluginInstaller.dispose();settingsActions.close();});
   return { server, shutdown, isBusy: () => shuttingDown || !!activeJob || protectingCredential || processRecoveryBusy, close: () => { server.closeAllConnections(); server.close(); }, start };
 }
 

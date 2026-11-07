@@ -68,6 +68,9 @@ class VoiceBoundaries(unittest.TestCase):
 
     def test_disabled_plugin_wrong_chat_account_or_missing_grant_never_returns_audio(self):
         self.assertTrue(audio_policy(self.root, KEY))
+        self.assertTrue(audio_policy(self.root, KEY, 'speech-recognition'))
+        self.assertFalse(audio_policy(self.root, KEY, ''))
+        self.assertFalse(audio_policy(self.root, KEY, 'other-plugin'))
         with self.assertRaises(PermissionError): self.catalog.record(self.ref['id'], 'wechat:private:456', 'speech-recognition')
         self.policy['plugins']['speech-recognition']['permissions'] = []
         self.save_policy()

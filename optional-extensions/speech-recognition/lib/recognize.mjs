@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import net from 'node:net';
+import {effectiveSpeechSettings,hasCustomRequest} from './presets.mjs';
 
 const cache = new Map();
 const forbidden = new Set(['__proto__', 'prototype', 'constructor']);
@@ -35,16 +36,16 @@ export function endpointUrl(value) {
 }
 
 export function resolveApi(config) {
+  config=effectiveSpeechSettings(config);
   const url=endpointUrl(config.endpoint),requested=config.apiProtocol??'custom';
   if(!['auto','custom','openai-transcriptions','openai-chat','chat-audio-data-url','anthropic-messages'].includes(requested))throw fault('VOICE_API_CONFIG_INVALID');
   const pathname=url.pathname.replace(/\/+$/,'');
   let protocol=requested;
   if(protocol==='auto'){
-    if(/\/(?:anthropic|messages)$/.test(pathname))protocol='anthropic-messages';
-    else if(config.requestMode==='json'||config.fileField&&config.fileField!=='file'||config.modelField&&config.modelField!=='model'||config.languageField&&config.languageField!=='language'||config.responsePath&&config.responsePath!=='text')protocol='custom';
+    if(hasCustomRequest(config))protocol='custom';
+    else if(/\/(?:anthropic|messages)$/.test(pathname))protocol='anthropic-messages';
     else if(/\/chat\/completions$/.test(pathname))protocol='openai-chat';
-    else if(/\/audio\/transcriptions$/.test(pathname)||/\/v\d+$/.test(pathname)||!pathname)protocol='openai-transcriptions';
-    else protocol='custom';
+    else protocol='openai-transcriptions';
   }
   let base=pathname;
   const terminal=/\/(?:audio\/transcriptions|chat\/completions|messages)$/;
@@ -52,7 +53,7 @@ export function resolveApi(config) {
   const route=protocol==='openai-transcriptions'?'/audio/transcriptions':['openai-chat','chat-audio-data-url'].includes(protocol)?'/chat/completions':protocol==='anthropic-messages'?'/v1/messages':null;
   if(route&&terminal.test(pathname)&&!(protocol==='anthropic-messages'?/\/messages$/.test(pathname):pathname.endsWith(route)))throw fault('VOICE_API_PROTOCOL_MISMATCH');
   if(route&&!terminal.test(pathname))url.pathname=(protocol==='anthropic-messages'?base.replace(/\/v1$/,''):base)+route;
-  const baseUrl=new URL(url);baseUrl.pathname=protocol==='anthropic-messages'?base.replace(/\/v1$/,''):base;baseUrl.search='';
+  const baseUrl=new URL(url);baseUrl.pathname=protocol==='anthropic-messages'?base.replace(/\/v1$/,''):base;
   return {protocol,url,baseUrl};
 }
 
@@ -65,7 +66,7 @@ export function requestHeaders(config,{protocol=resolveApi(config).protocol}={})
   if (config.apiKey) {
     if (!config.authHeader || /^(host|content-length|connection|transfer-encoding|proxy-authorization)$/i.test(config.authHeader)) throw fault('VOICE_API_CONFIG_INVALID');
     const key=config.apiKey.trim();
-    if(!key||/[^\x21-\x7e]/.test(key))throw fault('VOICE_API_KEY_INVALID');
+    if(!key||/[^\x21-\x7e]/.test(key)||/^Bearer\s/i.test(key)||/^[A-Z_][A-Z0-9_]*(?:_KEY|_TOKEN|_SECRET)=/.test(key)||/^(["']).*\1$/.test(key))throw fault('VOICE_API_KEY_INVALID');
     const automatic=config.authHeader.toLowerCase()==='authorization'&&config.authPrefix==='Bearer ';
     headers.set(protocol==='anthropic-messages'&&automatic?'x-api-key':config.authHeader,(protocol==='anthropic-messages'&&automatic?'':config.authPrefix)+key);
   }
@@ -75,6 +76,7 @@ export function requestHeaders(config,{protocol=resolveApi(config).protocol}={})
 }
 
 export function validateConfig(config) {
+  config=effectiveSpeechSettings(config);
   const {protocol}=resolveApi(config);
   if(protocol==='anthropic-messages')throw fault('VOICE_API_AUDIO_PROTOCOL_UNSUPPORTED');
   if(['openai-chat','chat-audio-data-url'].includes(protocol)&&config.audioFormat!=='wav')throw fault('VOICE_API_AUDIO_FORMAT_UNSUPPORTED');
@@ -83,7 +85,7 @@ export function validateConfig(config) {
   if(protocol!=='custom'&&!config.model.trim())throw fault('VOICE_MODEL_REQUIRED');
   if (!['multipart','json'].includes(config.requestMode) || !['json','text'].includes(config.responseMode)) throw fault('VOICE_API_CONFIG_INVALID');
   if (protocol==='custom'&&config.requestMode === 'json' && !/\{\{audio_(?:base64|data_url)\}\}/.test(config.jsonTemplate)) throw fault('VOICE_API_TEMPLATE_AUDIO_MISSING');
-  requestHeaders(config);
+  requestFor(config,{b64:'',mime:config.audioFormat==='silk'?'audio/silk':'audio/wav',filename:'validation.'+config.audioFormat,sampleRate:16000});
   return true;
 }
 
@@ -113,6 +115,7 @@ export function responseText(value, path) {
 }
 
 export function requestFor(config, audio) {
+  config=effectiveSpeechSettings(config);
   const {protocol}=resolveApi(config);
   if(protocol==='anthropic-messages')throw fault('VOICE_API_AUDIO_PROTOCOL_UNSUPPORTED');
   const headers = requestHeaders(config);
@@ -125,7 +128,7 @@ export function requestFor(config, audio) {
   if(['openai-chat','chat-audio-data-url'].includes(protocol)){
     if(audio.mime!=='audio/wav')throw fault('VOICE_API_AUDIO_FORMAT_UNSUPPORTED');
     const input_audio=protocol==='openai-chat'?{data:audio.b64,format:'wav'}:{data:variables.audio_data_url};
-    const content=[{type:'input_audio',input_audio},...(protocol==='openai-chat'?[{type:'text',text:'请准确转写音频中的语音，只返回转写文字，不回答或解释音频内容。'}]:[])];
+    const content=[{type:'input_audio',input_audio},{type:'text',text:'请准确转写音频中的语音，只返回转写文字，不回答或解释音频内容。'}];
     const extras=template(checkTree(objectJson(config.extraFieldsJson)),variables);
     if(['model','messages','stream'].some(key=>Object.hasOwn(extras,key)))throw fault('VOICE_API_CONFIG_INVALID');
     headers.set('content-type','application/json');
@@ -164,6 +167,7 @@ export async function limitedBody(response, maxBytes = 65536) {
 }
 
 export async function transcribeAudio(config, audio, {signal, fetchImpl = fetch} = {}) {
+  config=effectiveSpeechSettings(config);
   validateConfig(config);
   const {url,protocol}=resolveApi(config);
   const request = requestFor(config, audio);
@@ -184,7 +188,8 @@ export async function transcribeAudio(config, audio, {signal, fetchImpl = fetch}
 }
 
 export function voiceErrorCode(error) {
-  return /^VOICE_[A-Z0-9_]{3,80}$/.test(error.message ?? '') ? error.message
+  return /^VOICE_[A-Z0-9_]{3,80}$/.test(error.code ?? '') ? error.code
+    : /^VOICE_[A-Z0-9_]{3,80}$/.test(error.message ?? '') ? error.message
     : ['AbortError','TimeoutError'].includes(error.name) ? 'VOICE_API_TIMEOUT' : 'VOICE_API_REQUEST_FAILED';
 }
 
@@ -192,7 +197,7 @@ export async function recognize(ctx, {id}) {
   let stage='configuration';
   try {
     if (!/^[a-f0-9]{64}$/.test(id)) throw fault('VOICE_REFERENCE_INVALID');
-    const config = ctx.config();validateConfig(config);
+    const config = effectiveSpeechSettings(ctx.config());validateConfig(config);
     const identity = crypto.createHash('sha256').update(JSON.stringify([ctx.account.id, ctx.chat.key, id, config])).digest('hex');
     if (config.cacheResults && cache.has(identity)) return {...cache.get(identity), cached: true};
     stage='audio';const audio = await ctx.audio.read(id, {format: config.audioFormat});

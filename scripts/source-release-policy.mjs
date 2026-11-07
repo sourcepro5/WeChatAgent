@@ -5,12 +5,12 @@ import {unpackZip} from '../packages/plugin-api/zip.mjs';
 import {inspectPackage,packageFiles} from '../packages/plugin-api/catalog.mjs';
 import {BUNDLED_PLUGINS} from '../packages/plugin-api/bundled.mjs';
 import {PLUGIN_HOST_FILES,VOICE_HOST_FILES} from '../packages/plugin-api/contract.mjs';
-export const SOURCE_PLUGIN_ZIP='optional-extensions/packages/fish-notebook-1.0.0.zip';
+export const SOURCE_PLUGIN_ZIP='optional-extensions/packages/fish-notebook-1.1.1.zip';
 export const SOURCE_PLUGIN_ZIPS=Object.freeze(BUNDLED_PLUGINS.filter(item=>item.zip).map(item=>item.zip));
 export function sourceHostFiles(root){
   const required=[...PLUGIN_HOST_FILES,...VOICE_HOST_FILES,'packages/plugin-api/bundled.mjs',
     'packages/dsh-social-bridge-plugin/native-context.mjs','scripts/console-server.mjs','scripts/project-config.mjs',
-    'scripts/plugin-host-check.mjs','scripts/speech-plugin-console.mjs','scripts/release-version.mjs','public/console/plugins.js','public/console/plugin-contract.mjs','public/console/speech-settings.mjs'];
+    'scripts/plugin-host-check.mjs','scripts/plugin-config-ui.mjs','public/console/plugin-config-ui.mjs','scripts/plugin-ui.mjs','public/console/plugin-frame.mjs','public/console/plugin-page-sdk.mjs','scripts/plugin-settings-actions.mjs','scripts/voice-host-status.mjs','public/console/plugins.js','public/console/plugin-contract.mjs'];
   for(const bundle of BUNDLED_PLUGINS){for(const file of packageFiles(path.join(root,bundle.source)))required.push(bundle.source+'/'+file.name);if(bundle.zip)required.push(bundle.zip,bundle.zip+'.sha256');}
   return [...new Set(required)].sort();
 }

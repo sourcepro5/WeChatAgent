@@ -33,7 +33,7 @@ if(process.argv[2]==='--bridge-entry-fixture'){
       res.setHeader('Content-Type','application/json');
       if(req.url==='/health')res.end(JSON.stringify({ok:true,project:'WeChatAgent',projectRoot:root,contextMode:'native-session-v1',instanceId:'entry-fixture',instanceStartedAt:Date.now()}));
       else if(req.url==='/followup')res.end(JSON.stringify({text:'RESPOND: Fixture reply '+requests.length}));
-      else if(req.url==='/fish-notebook/ask')res.end(JSON.stringify({handled:true,text:'RESPOND: Fixture notebook reply'}));
+      else if(req.url==='/diary-question')res.end(JSON.stringify({handled:true,text:'RESPOND: Fixture notebook reply'}));
       else{res.statusCode=404;res.end('{}');}
     });
     t.after(async()=>{
@@ -56,7 +56,7 @@ if(process.argv[2]==='--bridge-entry-fixture'){
     };
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
     const wechat={enabled:true,whitelist:{private:['123'],groups:['456']},wake_mode:'hybrid',wake_words:['助手'],replyLayout:{maxMessages:0},search:{enabled:false},stickers:{enabled:false},proactive:{enabled:false},context:{enabled:false}};
-    const save=()=>fs.writeFileSync(configFile,JSON.stringify({version:1,wechat,persona:{default:'Fixture',chats:{}}}));
+    const save=()=>{const temporary=configFile+'.tmp';fs.writeFileSync(temporary,JSON.stringify({version:1,wechat,persona:{default:'Fixture',chats:{}}}));fs.renameSync(temporary,configFile);};
     fs.mkdirSync(path.dirname(configFile),{recursive:true});save();
     const bridgeConfig=path.join(root,'bridge.json');
     fs.writeFileSync(bridgeConfig,JSON.stringify({project_root:root,platforms:{wechat:{...wechat,onebot:{server:{host:'127.0.0.1',port:0,path:'/ws'}}}},role:'Fixture persona',role_name:'',message_buffer:{path:path.join(root,'state/messages.json')},search_policy_file:configFile,sticker_policy_file:configFile,proactive_policy_file:configFile,context_policy_file:configFile,proactive_state_file:path.join(root,'state/proactive.json'),social:{batch_ms:1,min_interval_ms:0,private_min_interval_ms:0,max_per_minute:100,max_per_ten_minutes:100},dsh_plugin:{url:'http://127.0.0.1:'+server.address().port,token:'fixture-token'}}));
@@ -81,7 +81,7 @@ if(process.argv[2]==='--bridge-entry-fixture'){
       await until(()=>sent.length===count+1,'confirmed reply');
       await until(()=>logs.match(/delivery=confirmed/g)?.length===sent.length,'recorded delivery');
     };
-    const turns=()=>requests.filter(item=>['/followup','/fish-notebook/ask'].includes(item.route));
+    const turns=()=>requests.filter(item=>['/followup','/diary-question'].includes(item.route));
     await send('private','hello fixture');
     assert.equal(turns().at(-1).body.conversationKey,'wechat:private:123');
     assert.equal(turns().at(-1).body.replyMaxMessages,0);assert.equal(turns().at(-1).body.fishNotebookRequest,undefined);
@@ -92,7 +92,7 @@ if(process.argv[2]==='--bridge-entry-fixture'){
     fs.writeFileSync(path.join(root,'plugins/fish-notebook/plugin.json'),JSON.stringify(manifest));
     fs.writeFileSync(path.join(root,'config/plugins.json'),JSON.stringify({version:1,plugins:{'fish-notebook':{enabled:true,permissions:manifest.permissions,chats:['wechat:private:123']}}}));
     wechat.replyLayout.maxMessages=4;save();await send('private','看看你的日记');
-    assert.equal(turns().at(-1).route,'/fish-notebook/ask');assert.equal(turns().at(-1).body.replyMaxMessages,4);
+    assert.equal(turns().at(-1).route,'/diary-question');assert.equal(turns().at(-1).body.replyMaxMessages,4);
     assert.match(turns().at(-1).body.fishNotebookRequest.viewer,/^[a-f0-9]{64}$/);
     await send('group','助手 看看你的日记');
     assert.equal(turns().at(-1).route,'/followup');assert.equal(turns().at(-1).body.fishNotebookRequest,undefined);

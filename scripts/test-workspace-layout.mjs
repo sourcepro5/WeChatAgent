@@ -7,7 +7,7 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 function fixture({offline=false,tab='summary',historyMode,running=false,workMode='assistant'}={}){
  const original=config(),state={config:original,draft:structuredClone(original),names:new Map([[key,'同名 <好友>'],[group,'同名 <好友>']]),chatKind:'all',chatDetailTab:tab,selectedChat:key},requests=[];
  const api=async(route,body)=>{requests.push({route,body});if(offline)throw Error('offline fixture');if(route==='/api/sessions')return {sessions:[{conversationKey:key,sessionId:'native-123',workMode,contextTokens:5200,running,...(historyMode?{history:{mode:historyMode},prefixRepairAvailable:historyMode==='recent-window-v1'&&workMode==='social',prefixRecovery:{status:'required'}}:{})},{conversationKey:group,sessionId:'native-456',contextTokens:8100}]};if(route==='/api/session-groups')return {available:true,groups:[],assignments:{}};if(route==='/api/assistant-task/list')return {tasks:[{id:'T0123456789abcdef',state:'waiting_approval',stage:'等待审批',createdAt:100000}]};throw Error('Unexpected request '+route);};
- const ui=createWorkspaceLayout({api,state,escapeHtml:esc,icon:()=>'',header:(title,help='')=>'<h2>'+esc(title)+'</h2><p>'+esc(help)+'</p>',field:()=>'',toggle:()=>'',empty:(title,help,actions)=>'<h2>'+esc(title)+'</h2><p>'+esc(help)+'</p>'+(actions??''),sessionGroupUI:{prepare(){},visible:()=>true,toolbar:()=>'',control:()=>''},sessionUsage:()=>'<div>Fixture usage</div>',getCards:()=>({participation:'PARTICIPATION',rhythm:'RHYTHM',proactive:'PROACTIVE',admins:'ADMINS',search:'SEARCH',reader:'READER',media:'MEDIA'}),contextSettingsCard:()=> 'CONTEXT',feedbackCard:()=> 'FEEDBACK',connectionsPage:()=> 'CONNECTIONS',logsPage:async()=> 'LOGS',toolsPage:()=> 'TOOLS',dshPage:async()=> 'DSH',stickerPage:async()=> 'STICKERS'});
+ const ui=createWorkspaceLayout({api,state,escapeHtml:esc,icon:()=>'',header:(title,help='')=>'<h2>'+esc(title)+'</h2><p>'+esc(help)+'</p>',field:()=>'',toggle:()=>'',empty:(title,help,actions)=>'<h2>'+esc(title)+'</h2><p>'+esc(help)+'</p>'+(actions??''),sessionGroupUI:{prepare(){},visible:()=>true,toolbar:()=>'',control:()=>'',isAvailable:()=>true,unavailableMessage:()=>''},sessionUsage:()=>'<div>Fixture usage</div>',getCards:()=>({participation:'PARTICIPATION',rhythm:'RHYTHM',proactive:'PROACTIVE',admins:'ADMINS',search:'SEARCH',reader:'READER',media:'MEDIA'}),contextSettingsCard:()=> 'CONTEXT',feedbackCard:()=> 'FEEDBACK',connectionsPage:()=> 'CONNECTIONS',logsPage:async()=> 'LOGS',toolsPage:()=> 'TOOLS',dshPage:async()=> 'DSH',stickerPage:async()=> 'STICKERS'});
  return {state,ui,requests};
 }
 test('main entries preserve legacy links and isolate memory subpage routes',()=>{
@@ -29,7 +29,7 @@ test('merged chat rendering is read-only, escaped and retains one settings entry
  const f=fixture(),before=JSON.stringify(f.state.draft),html=await f.ui.chatsPage();assert.match(html,/同名 &lt;好友&gt;/);assert(!html.includes('同名 <好友>'));assert.equal([...html.matchAll(/data-chat-settings=/g)].length,1);assert.equal([...html.matchAll(/data-chat-select=/g)].length,2);assert(!html.includes('data-dsh-chat'));assert.match(html,/本聊天单独设置/);assert.equal(JSON.stringify(f.state.draft),before);assert(f.requests.every(item=>item.body===undefined));
 });
 test('offline DSH leaves contact settings available and never invents a session',async()=>{
- const f=fixture({offline:true}),before=JSON.stringify(f.state.config),html=await f.ui.chatsPage();assert.equal([...html.matchAll(/data-chat-select=/g)].length,2);assert.match(html,/会话服务暂不可用/);assert.match(html,/初始化此聊天/);assert(!html.includes('native-123'));assert.equal(JSON.stringify(f.state.config),before);
+ const f=fixture({offline:true}),before=JSON.stringify(f.state.config),html=await f.ui.chatsPage();assert.equal([...html.matchAll(/data-chat-select=/g)].length,2);assert.match(html,/任务与用量暂不可用/);assert.match(html,/初始化此聊天/);assert(!html.includes('native-123'));assert.equal(JSON.stringify(f.state.config),before);
 });
 
 test('memory shortcuts keep the selected saved chat and do not expose unsaved group drafts',async()=>{
@@ -56,4 +56,14 @@ test('window context repair is visible only for social windows, is disabled whil
  assert.match(await busy.ui.chatsPage(),/data-context-session="native-123" disabled/);
  assert(!(await fixture({tab:'usage',historyMode:'recent-window-v1'}).ui.chatsPage()).includes('data-context-repair'));
  const bounded=fixture({tab:'usage',historyMode:'external-bounded-v1',workMode:'social'});bounded.state.draft.wechat.workModes[key]='social';assert(!(await bounded.ui.chatsPage()).includes('data-context-repair'));
+});
+test('usage tab shows current context against the compaction threshold as a meter',async()=>{
+ const f=fixture({tab:'usage'});f.state.draft.wechat.context={...f.state.draft.wechat.context,maxTokens:100000,chats:{}};
+ const html=await f.ui.chatsPage();
+ assert.match(html,/<div class="usage-stat"><span>当前上下文<\/span><strong>5,200 token<\/strong><small>压缩阈值 100,000 token<\/small>/);
+ assert.match(html,/<progress class="usage-meter" max="100000" value="5200"/);
+ const off=fixture({tab:'usage'});off.state.draft.wechat.context={...off.state.draft.wechat.context,maxTokens:100000,chats:{[off.state.selectedChat]:0}};
+ const offHtml=await off.ui.chatsPage();
+ assert.match(offHtml,/此聊天已关闭自动压缩/);
+ assert(!offHtml.includes('usage-meter'));
 });

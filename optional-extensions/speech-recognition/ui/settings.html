@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="settings.js"></script>
+</head>
+<body>
+  <p class="lead">填好平台地址和密钥，读取模型后下拉选择，或手动填写模型 ID。最后用内置短句测试。</p>
+  <p class="notice" id="run-note" hidden>读取模型和测试识别会在本机运行此插件的代码：请先勾选上方“允许此插件运行”。测试不会启用插件，保存后才生效。</p>
+  <section class="panel" aria-labelledby="connection-heading">
+    <h3 id="connection-heading"><span class="step">1</span>连接识别服务</h3>
+    <div class="grid" id="connection-fields"></div>
+  </section>
+  <section class="panel" aria-labelledby="model-heading">
+    <h3 id="model-heading"><span class="step">2</span>选择识别模型</h3>
+    <div class="field">
+      <label for="field-model" id="model-label">识别模型</label>
+      <div class="model-row">
+        <select id="model-list" aria-label="从模型列表选择" aria-describedby="model-hint" disabled>
+          <option value="">请先读取模型列表</option>
+        </select>
+        <span id="model-input"></span>
+      </div>
+      <small id="model-hint" role="status">点击“连接并读取模型”后可下拉选择，也可手动填写模型 ID。</small>
+    </div>
+  </section>
+  <section class="panel" aria-labelledby="verify-heading">
+    <div class="panel-heading">
+      <h3 id="verify-heading"><span class="step">3</span>测试识别</h3>
+      <span id="state" class="tag pending">尚未测试</span>
+    </div>
+    <p id="note" role="status" aria-live="polite">用内置短句试一次，成功后选择聊天范围并保存。</p>
+    <div class="actions">
+      <button type="button" id="read-models">连接并读取模型</button>
+      <button type="button" id="check-api" class="primary">测试识别（内置短句）</button>
+    </div>
+    <small>读取模型只发送 GET 请求，不上传语音。测试仅发送插件自带的“语音识别测试”短音频，不使用聊天语音；可能使用服务商额度。</small>
+    <details class="checks-details">
+      <summary>查看检测详情</summary>
+      <ul id="checks" class="checks"></ul>
+    </details>
+  </section>
+  <details class="panel advanced">
+    <summary>高级设置（通常不用修改）</summary>
+    <p class="hint">手动修改请求协议、模板或返回路径后，将保留你的自定义配置。</p>
+    <div class="grid two" id="advanced-fields"></div>
+  </details>
+  <p class="error" id="error" role="alert"></p>
+</body>
+</html>

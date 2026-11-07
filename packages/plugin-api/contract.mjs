@@ -1,7 +1,7 @@
 // Pure shared data: installer, runtime, worker, DSH health and console UI use it.
 export const API_VERSION = 2;
 export const HOST_RUNTIME = 'isolated-v2';
-export const CONTRACT_REVISION = 'wechatagent-plugin-v2.1';
+export const CONTRACT_REVISION = 'wechatagent-plugin-v2.2';
 export const PERMISSION_LABELS = Object.freeze({
   storage: '保存插件数据',
   history_read: '读取当前聊天历史',
@@ -21,6 +21,7 @@ export const FEATURE_LABELS = Object.freeze({
   'model-utility-v1': '独立模型生成',
   'daily-schedule-v1': '每日计划',
   'voice-input-v1': '微信语音输入',
+  'diary-question-v1': '微信日记询问',
 });
 export const HOST_FEATURES = Object.freeze(Object.keys(FEATURE_LABELS));
 export const PERMISSION_FEATURES = Object.freeze({
@@ -28,6 +29,13 @@ export const PERMISSION_FEATURES = Object.freeze({
   model_generate: 'model-utility-v1', schedule: 'daily-schedule-v1', audio_read: 'voice-input-v1',
 });
 export const HOOKS = Object.freeze(['before-context', 'after-response']);
+// Host features that hand one kind of incoming chat event to one plugin action.
+// A plugin opts in by declaring the feature (or the permission that implies it)
+// and registering the action; the host never routes these by plugin id.
+export const FEATURE_ENTRIES = Object.freeze({
+  'voice-input-v1': Object.freeze({action: 'transcribe', permission: 'audio_read'}),
+  'diary-question-v1': Object.freeze({action: 'ask', permission: 'reply'}),
+});
 
 export function requiredHostFeatures(item) {
   return [...new Set([...(item.requiresHostFeatures ?? []), ...(item.permissions ?? []).map(name => PERMISSION_FEATURES[name]).filter(Boolean), ...(item.schedule ? ['daily-schedule-v1'] : [])])];

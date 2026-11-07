@@ -27,6 +27,12 @@ async function ensure(ctx,allowEmpty){
   const entry={version:1,accountScope:ctx.account.id,conversationKey:ctx.chat.key,id,date,personaName:persona.personaName,personaDigest:persona.digest??hash(persona.persona),createdAt:ctx.now,sourceCount:rows.length,text,visitors:{}};
   await ctx.documents.put(id,entry);return entry;
 }
+// Plugin page view: newest first, no visitor counts or receipts, never counted as a request.
+export async function list(ctx,{offset=0}={}){
+  const page=await ctx.documents.list({offset,limit:12});let errors=page.errors;
+  const entries=page.entries.flatMap(entry=>{try{return [publicEntry(validate(entry,ctx,entry.id))];}catch{errors++;return [];}});
+  return {entries,total:page.total,offset:page.offset,limit:page.limit,errors};
+}
 export function generate(ctx,{allowEmpty=false}={}){return serial(ctx,async()=>{const entry=await ensure(ctx,allowEmpty);return entry?{ok:true,entry:publicEntry(entry)}:{retryLater:true};});}
 export function ask(ctx,request){
   if(!HEX.test(request?.id??'')||!HEX.test(request.viewer??''))throw Error('NOTEBOOK_QUESTION_INVALID');

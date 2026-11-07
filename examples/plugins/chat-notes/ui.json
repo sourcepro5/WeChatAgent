@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "settings": {"entry": "settings.html", "height": 220},
+  "page": {"entry": "page.html", "title": "聊天小便签", "description": "按聊天查看和删除已记下的便签。"}
+}

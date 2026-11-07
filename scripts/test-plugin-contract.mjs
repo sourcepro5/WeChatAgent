@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {API_VERSION,HOST_RUNTIME,HOST_FEATURES,PERMISSIONS,PERMISSION_LABELS,hostContract,hostCompatibility,requiredHostFeatures,PLUGIN_HOST_FILES,VOICE_HOST_FILES} from '../packages/plugin-api/contract.mjs';
 import {PERMISSION_LABELS as uiPermissions} from '../public/console/plugin-contract.mjs';
-import {manifest,configuration,updatePlugin,pluginCatalog,runtimeCatalog,atomicJson,packageFiles} from '../packages/plugin-api/catalog.mjs';
+import {manifest,configuration,updatePlugin,pluginCatalog,runtimeCatalog,atomicJson,packageFiles,featurePlugins} from '../packages/plugin-api/catalog.mjs';
 import {PluginRuntime} from '../packages/plugin-api/index.mjs';
 import {PluginProcess} from '../packages/plugin-api/process.mjs';
 import {PluginInstaller} from '../packages/plugin-api/installer.mjs';
@@ -57,6 +57,28 @@ test('requiresAccount plugins never execute setup before account binding',async 
   const runtime=new PluginRuntime({root});t.after(()=>runtime.dispose());await runtime.sync();assert.equal(fs.existsSync(marker),false);assert.match(runtime.list()[0].reason,/绑定微信账号/);
 });
 
+test('chat features go to the one plugin that declares them, never to a fixed id',async t=>{
+  const root=temp(t),id='a'.repeat(64);atomicJson(path.join(root,'config/wechatagent.json'),{wechat:{whitelist:{private:['123'],groups:[]}}});
+  const action=(name,value)=>`export function setup(api){api.registerAction({id:${JSON.stringify(name)},description:'fixture',parameters:{type:'object',properties:{id:{type:'string'}},additionalProperties:false},execute:()=>(${JSON.stringify(value)})});}`;
+  installFixture(root,{id:'voice-a',permissions:['audio_read']},action('transcribe',{ok:true,text:'a'}));
+  installFixture(root,{id:'voice-b',permissions:['audio_read']},action('transcribe',{ok:true,text:'b'}));
+  installFixture(root,{id:'diary-x',permissions:['reply'],requiresHostFeatures:['diary-question-v1']},action('ask',{handled:true,text:'RESPOND: x'}));
+  installFixture(root,{id:'plain',permissions:['reply']},action('ask',{handled:true,text:'RESPOND: plain'}));
+  const grant=(name,permissions)=>updatePlugin(root,name,{revision:configuration(root).revision,enabled:true,permissions,chats:[key],settings:{}});
+  grant('voice-a',['audio_read']);grant('plain',['reply']);
+  const runtime=new PluginRuntime({root,accountScope:'fixture-account'});t.after(()=>runtime.dispose());
+  assert.deepEqual(featurePlugins(root,'voice-input-v1',key),[{id:'voice-a',generation:configuration(root).config.plugins['voice-a'].generation}]);
+  assert.deepEqual(featurePlugins(root,'voice-input-v1','wechat:private:999'),[]);assert.deepEqual(featurePlugins(root,'unknown-v1',key),[]);
+  const voice=await runtime.invokeFeature('voice-input-v1',{id},{conversationKey:key,voiceIds:[id]});
+  assert.deepEqual(voice,{handled:true,plugin:'voice-a',generation:configuration(root).config.plugins['voice-a'].generation,result:{ok:true,text:'a'}});
+  // An ask action without the declaration is not a diary handler.
+  assert.deepEqual(featurePlugins(root,'diary-question-v1',key),[]);assert.deepEqual(await runtime.invokeFeature('diary-question-v1',{},{conversationKey:key}),{handled:false});
+  grant('diary-x',['reply']);assert.deepEqual(featurePlugins(root,'diary-question-v1',key).map(item=>item.id),['diary-x']);
+  const diary=await runtime.invokeFeature('diary-question-v1',{},{conversationKey:key});assert.equal(diary.plugin,'diary-x');assert.deepEqual(diary.result,{handled:true,text:'RESPOND: x'});
+  grant('voice-b',['audio_read']);assert.deepEqual(featurePlugins(root,'voice-input-v1',key).map(item=>item.id),['voice-a','voice-b']);
+  await assert.rejects(()=>runtime.invokeFeature('voice-input-v1',{id},{conversationKey:key,voiceIds:[id]}),error=>error.message==='PLUGIN_FEATURE_CONFLICT'&&error.plugins.join()==='voice-a,voice-b');
+});
+
 test('mixed parent and worker contract versions are rejected before registering tools',()=>{
   let reason;const process=new PluginProcess({},{onFailure:code=>reason=code});process.loading={reject:()=>{}};
   process.message({type:'ready',contract:{...hostContract(),features:[]},tools:[],actions:[],hooks:[],scheduled:false});assert.equal(process.closed,true);assert.equal(reason,'PLUGIN_HOST_CONTRACT_MISMATCH');
@@ -66,7 +88,7 @@ test('console previews incompatibility, serves the canonical contract and reject
   const root=temp(t),config=JSON.parse(fs.readFileSync(path.join(project,'config/wechatagent.example.json')));config.wechat.whitelist={private:['123'],groups:[]};
   atomicJson(path.join(root,'config/wechatagent.json'),config);fs.mkdirSync(path.join(root,'roles'));fs.writeFileSync(path.join(root,'roles',config.persona.default+'.md'),'Fixture persona');
   fs.mkdirSync(path.join(root,'state'));fs.writeFileSync(path.join(root,'state/social-dsh-token.txt'),'fixture-dsh-token');
-  let health={...oldHost,projectRoot:root};const app=createConsole({root,port:0,speechCapabilities:async()=>({checked:true,decoder:true}),fetchImpl:async input=>new Response(JSON.stringify(new URL(input).pathname==='/health'?health:{extensions:[]}))});t.after(()=>app.close());
+  let health={...oldHost,projectRoot:root};const app=createConsole({root,port:0,voiceCapabilities:async()=>({checked:true,decoder:true}),fetchImpl:async input=>new Response(JSON.stringify(new URL(input).pathname==='/health'?health:{extensions:[]}))});t.after(()=>app.close());
   const address=await app.start(),base='http://127.0.0.1:'+address.port,{token}=await fetch(base+'/api/info').then(r=>r.json());
   const rpc=async(route,body)=>{const response=await fetch(base+route,{method:body?'POST':'GET',headers:{'X-Console-Token':token,...(body?{'content-type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});return {status:response.status,body:await response.json()};};
   const served=await fetch(base+'/plugin-contract.mjs').then(r=>r.text());assert.equal(served,fs.readFileSync(path.join(project,'packages/plugin-api/contract.mjs'),'utf8'));
@@ -78,7 +100,7 @@ test('console previews incompatibility, serves the canonical contract and reject
 });
 
 function auditFixture(t){
-  const root=temp(t);const files=[...PLUGIN_HOST_FILES,...VOICE_HOST_FILES,'packages/plugin-api/bundled.mjs','packages/extension-runtime/catalog.mjs','scripts/project-config.mjs','scripts/console-server.mjs','scripts/speech-plugin-console.mjs','packages/dsh-social-bridge-plugin/native-context.mjs','public/console/plugins.js','public/console/plugin-contract.mjs','public/console/speech-settings.mjs'];
+  const root=temp(t);const files=[...PLUGIN_HOST_FILES,...VOICE_HOST_FILES,'packages/plugin-api/bundled.mjs','packages/extension-runtime/catalog.mjs','scripts/project-config.mjs','scripts/console-server.mjs','scripts/plugin-ui.mjs','scripts/plugin-settings-actions.mjs','scripts/voice-host-status.mjs','packages/dsh-social-bridge-plugin/native-context.mjs','public/console/plugins.js','public/console/plugin-contract.mjs','public/console/plugin-frame.mjs'];
   for(const relative of new Set(files)){const target=path.join(root,relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(project,relative),target);}
   atomicJson(path.join(root,'package.json'),{type:'module'});
   for(const item of BUNDLED_PLUGINS){fs.cpSync(path.join(project,item.source),path.join(root,item.source),{recursive:true});if(item.zip){fs.mkdirSync(path.dirname(path.join(root,item.zip)),{recursive:true});for(const suffix of ['', '.sha256'])fs.copyFileSync(path.join(project,item.zip+suffix),path.join(root,item.zip+suffix));}}

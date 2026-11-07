@@ -17,7 +17,7 @@ import {normalizeOneBotEvent} from '../components/qq-bridge/src/onebot/normalize
 const source=path.resolve('optional-extensions/speech-recognition'),manifest=inspectPackage(source),defaults=manifest.settings;
 const id='a'.repeat(64),key='wechat:private:123',other='wechat:group:456';
 const audio={id,b64:Buffer.from('synthetic-audio').toString('base64'),mime:'audio/wav',filename:'voice.wav',sampleRate:16000,durationSeconds:2};
-function context(config={},read=async()=>audio){return {account:{id:'fixture'},chat:{key},signal:new AbortController().signal,config:()=>({...defaults,...config}),audio:{read}};}
+function context(config={},read=async()=>audio){return {account:{id:'fixture'},chat:{key},signal:new AbortController().signal,config:()=>({...defaults,apiProtocol:'custom',...config}),audio:{read}};}
 async function server(t,handler){const s=http.createServer((req,res)=>void Promise.resolve(handler(req,res)).catch(error=>{res.writeHead(500);res.end(error.message);}));await new Promise(resolve=>s.listen(0,'127.0.0.1',resolve));t.after(()=>{s.closeAllConnections();s.close();});return 'http://127.0.0.1:'+s.address().port+'/custom/asr';}
 
 test('package declares scoped audio permission and ships no endpoint, credential, model or dependencies',()=>{
@@ -91,7 +91,7 @@ test('the actual ZIP runs in its isolated worker and only uploads its bound synt
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-actual-plugin-'));
   atomicJson(path.join(root,'config/wechatagent.json'),{wechat:{whitelist:{private:['123'],groups:[]}}});
   const installer=new PluginInstaller(root),preview=installer.inspect({name:'speech.zip',zip:packZip(packageFiles(source)).toString('base64')});installer.install(preview);
-  updatePlugin(root,manifest.id,{revision:configuration(root).revision,enabled:true,permissions:['audio_read'],chats:[key],settings:{...defaults,endpoint,apiKey:'secret-only-in-settings'}});
+  updatePlugin(root,manifest.id,{revision:configuration(root).revision,enabled:true,permissions:['audio_read'],chats:[key],settings:{...defaults,apiProtocol:'custom',endpoint,apiKey:'secret-only-in-settings'}});
   assert(!JSON.stringify(pluginCatalog(root)).includes('secret-only-in-settings'));
   const runtime=new PluginRuntime({root,accountScope:'fixture-account',readAudio:async(voiceId,chat,plugin)=>{assert.equal(voiceId,id);assert.equal(chat,key);assert.equal(plugin,manifest.id);return audio;}});
   t.after(async()=>{await runtime.dispose();installer.dispose();fs.rmSync(root,{recursive:true,force:true,maxRetries:5});});

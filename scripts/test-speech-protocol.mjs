@@ -60,11 +60,57 @@ test('HTTP failure never retries an upload under another protocol and retains th
   let calls=0;await assert.rejects(()=>transcribeAudio(config(),audio,{fetchImpl:async()=>{calls++;return new Response('private provider body',{status:403});}}),/VOICE_API_HTTP_403/);assert.equal(calls,1);
 });
 
+test('auto uses address structure for arbitrary model aliases and retains gateway query parameters',async()=>{
+  for(const model of ['customer/audio-v2','qwen-audio-3.1-asr-flash','whisper-1','gpt-4o-transcribe','model-with-no-audio-keyword']){
+    const c=config({apiProtocol:'auto',endpoint:'https://asr.example.test/tenant/proxy?api-version=fixture',model});
+    assert.equal(resolveApi(c).url.href,'https://asr.example.test/tenant/proxy/audio/transcriptions?api-version=fixture');
+    assert.equal(modelsCandidates(c)[0].href,'https://asr.example.test/tenant/proxy/models?api-version=fixture');
+    assert.equal(requestFor(c,audio).body.get('model'),model);
+    const chat={...c,endpoint:'https://asr.example.test/tenant/proxy/chat/completions'};
+    assert.equal(resolveApi(chat).protocol,'openai-chat');assert.equal(JSON.parse(requestFor(chat,audio).body).model,model);
+  }
+  const c=config({apiProtocol:'anthropic-messages',endpoint:'https://asr.example.test/tenant/v1?region=fixture'});
+  assert.equal(modelsCandidates(c)[0].search,'?region=fixture&limit=1000');
+  const pasted=config({apiProtocol:'auto',endpoint:'  https://asr.example.test/v1  ',model:'  tenant/opaque-alias  '});
+  assert.equal(requestFor(pasted,audio).body.get('model'),'tenant/opaque-alias');assert.equal(pasted.model,'  tenant/opaque-alias  ');
+});
+
+test('directory aliases without capability metadata stay selectable without claiming audio support',()=>{
+  const list=normalizeModels({models:{'tenant/alias':{id:'upstream-canonical-id'},'declared-text':{input:['text']},'declared-socket':{transport:'websocket'}}});
+  assert.equal(list.find(item=>item.id==='tenant/alias').audioCandidate,true);
+  assert.equal(list.find(item=>item.id==='tenant/alias').audioDeclared,null);
+  assert.equal(list.find(item=>item.id==='declared-text').audioCandidate,false);
+  assert.equal(list.find(item=>item.id==='declared-socket').audioCandidate,false);
+  assert(!list.some(item=>item.id==='upstream-canonical-id'));
+});
+
+test('pasted credential wrappers and malformed request parameters fail before audio is read',async()=>{
+  for(const extra of [
+    {apiKey:'Bearer fixture-key'},{apiKey:'"fixture-key"'},{apiKey:"'fixture-key'"},{apiKey:'SERVICE_API_KEY=fixture-key'},
+    {extraFieldsJson:'not-json'},{apiProtocol:'openai-chat',extraFieldsJson:'{"messages":[]}'},
+    {apiProtocol:'custom',requestMode:'json',jsonTemplate:'{"clip":"{{audio_base64}}","bad":"{{unknown}}"}'},
+  ]){
+    let reads=0;const result=await recognize({config:()=>config(extra),audio:{read(){reads++;}}},{id:'a'.repeat(64)});
+    assert.equal(result.ok,false);assert.equal(result.stage,'configuration');assert.equal(reads,0);
+  }
+  assert.equal(requestHeaders(config({apiKey:'YWJjZA=='})).get('authorization'),'Bearer YWJjZA==');
+});
+
+test('legacy auto JSON, text responses and field mappings retain their exact custom endpoints',()=>{
+  for(const extra of [{requestMode:'json'},{responseMode:'text'},{fileField:'clip'},{modelField:'alias'},{languageField:'locale'},{responsePath:'payload.text'},{responsePath:''}]){
+    const c=config({apiProtocol:'auto',endpoint:'https://asr.example.test/private-upload',...extra});
+    assert.equal(resolveApi(c).protocol,'custom');assert.equal(resolveApi(c).url.pathname,'/private-upload');
+  }
+  const mapped=config({apiProtocol:'auto',endpoint:'https://asr.example.test/v1/messages',requestMode:'json'});
+  assert.equal(resolveApi(mapped).protocol,'custom');assert.equal(resolveApi(mapped).url.pathname,'/v1/messages');
+});
+
 test('runtime diagnostics only store bounded metadata for the current settings generation',t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-status-'));t.after(()=>{assert(root.startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(root,{recursive:true,force:true});});
-  writeVoiceAttempt(root,{ok:false,code:'VOICE_API_HTTP_403',stage:'api',text:'private transcript',apiKey:'private key'},'fixture-generation');
-  const result=readVoiceAttempt(root,'fixture-generation');assert.equal(result.code,'VOICE_API_HTTP_403');assert.equal(readVoiceAttempt(root,'new-generation'),null);
-  const raw=fs.readFileSync(path.join(root,'state/plugin-service-checks/speech-runtime.json'),'utf8');assert(!raw.includes('private'));assert(!raw.includes('transcript'));
+  writeVoiceAttempt(root,'voice-fixture',{ok:false,code:'VOICE_API_HTTP_403',stage:'api',text:'private transcript',apiKey:'private key'},'fixture-generation');
+  const result=readVoiceAttempt(root,'voice-fixture','fixture-generation');assert.equal(result.code,'VOICE_API_HTTP_403');assert.equal(readVoiceAttempt(root,'voice-fixture','new-generation'),null);
+  assert.equal(readVoiceAttempt(root,'other-plugin','fixture-generation'),null);writeVoiceAttempt(root,'../escape',{ok:true},'fixture-generation');assert(!fs.existsSync(path.join(root,'state/plugin-service-checks/escape.json')));
+  const raw=fs.readFileSync(path.join(root,'state/plugin-service-checks/voice-input/voice-fixture.json'),'utf8');assert(!raw.includes('private'));assert(!raw.includes('transcript'));
 });
 
 const voice=id=>({platform:'wechat',kind:'private',conversation_id:id,message_id:id,text:'[语音]',voice:{id:'a'.repeat(64),durationSeconds:1}});
@@ -75,8 +121,8 @@ test('three simultaneous chats wait for two recognition slots rather than droppi
 });
 
 test('a failed voice is reported as received and preserves a safe error code in diagnostics and fallback text',async()=>{
-  let diagnostic,delivered;const ingress=new VoiceIngress({generationFor:()=> 'fixture-generation',recognize:async()=>({ok:false,code:'VOICE_API_HTTP_403',stage:'api'}),onResult:(_message,result,generation)=>{diagnostic={...result,generation};},deliver:message=>{delivered=message;}});
-  await ingress.push(voice('1'));assert.equal(diagnostic.generation,'fixture-generation');assert.equal(diagnostic.code,'VOICE_API_HTTP_403');assert.match(delivered.text,/语音消息已收到/);assert.match(delivered.text,/VOICE_API_HTTP_403/);ingress.stop();
+  let diagnostic,delivered;const ingress=new VoiceIngress({generationFor:message=>'fixture-generation:'+message.conversation_id,recognize:async()=>({ok:false,code:'VOICE_API_HTTP_403',stage:'api',plugin:'voice-fixture'}),onResult:(_message,result,generation)=>{diagnostic={...result,generation};},deliver:message=>{delivered=message;}});
+  await ingress.push(voice('1'));assert.equal(diagnostic.generation,'fixture-generation:1');assert.equal(diagnostic.plugin,'voice-fixture');assert.equal(diagnostic.code,'VOICE_API_HTTP_403');assert.match(delivered.text,/语音消息已收到/);assert.match(delivered.text,/VOICE_API_HTTP_403/);ingress.stop();
 });
 
 test('stopping the bridge wakes queued recognition slots and prevents new uploads or deliveries',async()=>{

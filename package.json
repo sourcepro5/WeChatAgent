@@ -1,6 +1,6 @@
 {
   "name": "wechatagent",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "type": "module",
   "description": "Personal WeChat AI friend with NT reader, WeChat-Hook, OneBot v11 and an existing DSH Desktop",
@@ -45,22 +45,22 @@
     "test:assistant": "node --test scripts/test-assistant-mode.mjs scripts/test-native-session.mjs scripts/test-assistant-controller.mjs scripts/test-assistant-access.mjs scripts/test-assistant-feedback.mjs",
     "test:catalog": "node --test scripts/test-plugin-catalog.mjs scripts/test-extension-page.mjs scripts/test-persona-categories.mjs",
     "test:assistant-access": "node --test scripts/test-assistant-access.mjs scripts/test-assistant-mode.mjs scripts/test-native-session.mjs",
-    "test": "node --test scripts/test-*.mjs scripts/test-plugin-contract.mjs scripts/test-source-plugin-zip.mjs scripts/test-speech-recognition.mjs scripts/test-voice-input.mjs scripts/test-speech-diagnostics.mjs scripts/test-voice-codec.mjs scripts/test-speech-protocol.mjs scripts/test-release-version.mjs components/qq-bridge/scripts/test-social-e2e.mjs",
+    "test": "node --test scripts/test-*.mjs scripts/test-plugin-contract.mjs scripts/test-source-plugin-zip.mjs scripts/test-speech-recognition.mjs scripts/test-voice-input.mjs scripts/test-speech-diagnostics.mjs scripts/test-speech-setup.mjs scripts/test-speech-plugin-standalone.mjs scripts/test-voice-codec.mjs scripts/test-speech-protocol.mjs scripts/test-release-version.mjs components/qq-bridge/scripts/test-social-e2e.mjs",
     "test:assistant-controller": "node --test scripts/test-assistant-controller.mjs scripts/test-assistant-mode.mjs scripts/test-assistant-access.mjs scripts/test-file-transfers.mjs scripts/test-assistant-feedback.mjs",
     "test:assistant-feedback": "node --test scripts/test-assistant-feedback.mjs",
     "test:layout": "node --test scripts/test-workspace-layout.mjs scripts/test-extension-page.mjs",
     "test:history": "node --test scripts/test-request-window.mjs scripts/test-window-reply-dedup.mjs scripts/test-history.mjs scripts/test-cost-next.mjs",
     "history:cost": "node scripts/history-cost.mjs",
-    "test:plugins-v2": "node --test scripts/test-plugin-api.mjs scripts/test-plugin-contract.mjs scripts/test-source-plugin-zip.mjs scripts/test-fish-notebook-plugin.mjs scripts/test-speech-recognition.mjs scripts/test-voice-input.mjs scripts/test-speech-diagnostics.mjs scripts/test-voice-codec.mjs scripts/test-speech-protocol.mjs",
+    "test:plugins-v2": "node --test scripts/test-plugin-api.mjs scripts/test-plugin-ui-lifecycle.mjs scripts/test-plugin-frame.mjs scripts/test-plugin-contract.mjs scripts/test-source-plugin-zip.mjs scripts/test-fish-notebook-plugin.mjs scripts/test-speech-recognition.mjs scripts/test-voice-input.mjs scripts/test-speech-diagnostics.mjs scripts/test-speech-setup.mjs scripts/test-speech-plugin-standalone.mjs scripts/test-voice-codec.mjs scripts/test-speech-protocol.mjs",
     "test:fish-notebook-plugin": "node --test scripts/test-fish-notebook-plugin.mjs",
-    "test:speech-recognition": "node --test scripts/test-speech-recognition.mjs scripts/test-voice-input.mjs scripts/test-speech-diagnostics.mjs scripts/test-voice-codec.mjs scripts/test-speech-protocol.mjs",
+    "test:speech-recognition": "node --test scripts/test-speech-recognition.mjs scripts/test-voice-input.mjs scripts/test-speech-diagnostics.mjs scripts/test-speech-setup.mjs scripts/test-speech-plugin-standalone.mjs scripts/test-voice-codec.mjs scripts/test-speech-protocol.mjs",
     "test:plugin-contract": "node --test scripts/test-plugin-contract.mjs scripts/test-source-plugin-zip.mjs",
     "plugin:check": "node scripts/plugin-host-check.mjs",
     "plugin:pack": "node scripts/pack-bundled-plugins.mjs",
     "source:check": "node scripts/public-source-check.mjs",
     "source:build": "node scripts/build-source-release.mjs",
     "release:verify": "node scripts/verify-plugin-release.mjs",
-    "test:speech-diagnostics": "node --test scripts/test-speech-diagnostics.mjs",
+    "test:speech-diagnostics": "node --test scripts/test-speech-diagnostics.mjs scripts/test-speech-setup.mjs scripts/test-speech-plugin-standalone.mjs",
     "test:voice-codec": "node --test scripts/test-voice-codec.mjs",
     "test:speech-protocol": "node --test scripts/test-speech-protocol.mjs",
     "test:release-version": "node --test scripts/test-release-version.mjs scripts/test-public-update-check.mjs",
@@ -76,5 +76,5 @@
     "sharp": "0.34.5",
     "resedit": "1.7.2"
   },
-  "releaseVersion": "0.4.2"
+  "releaseVersion": "0.4.3"
 }

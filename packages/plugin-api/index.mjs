@@ -6,6 +6,7 @@ import {safeFetch} from '../../components/qq-bridge/src/safe-fetch.js';
 import {PluginDocuments} from './documents.mjs';
 import {createAudioReader} from './audio.mjs';
 import {boundedTask} from '../dsh-social-bridge-plugin/deadline.mjs';
+import {FEATURE_ENTRIES} from './contract.mjs';
 export {createPluginModelUtility} from './model-utility.mjs';
 export const TOOL_POLICY=Symbol.for('wechatagent.extension-tools.v1');
 
@@ -164,6 +165,24 @@ export class PluginRuntime{
     if(!record||!this.active(record,turn.conversationKey))return {handled:false};
     const action=record.process.actions.find(action=>action.id===name);if(!action)throw fail('PLUGIN_ACTION_UNAVAILABLE');validateValue(args,action.parameters);
     return this.invoke(record,'action',name,args,turn,{signal,timeoutMs,requireReply});
+  }
+  // FEATURE_ENTRIES routing: active plugins for this chat that declare the
+  // feature, hold its permission and register its action.
+  featureHandlers(feature,key){
+    const entry=FEATURE_ENTRIES[feature];if(!entry)return [];
+    return [...this.records.values()].filter(record=>this.active(record,key,entry.permission)&&record.requiresHostFeatures?.includes(feature)&&record.process.actions?.some(action=>action.id===entry.action)).sort((a,b)=>a.id.localeCompare(b.id));
+  }
+  async invokeFeature(feature,args,turn,options={}){
+    const entry=FEATURE_ENTRIES[feature];if(!entry)throw fail('PLUGIN_FEATURE_UNAVAILABLE');
+    if(!allowedChat(this.root,turn.conversationKey))throw fail('PLUGIN_CHAT_UNAVAILABLE');await this.sync();
+    const handlers=this.featureHandlers(feature,turn.conversationKey);
+    if(!handlers.length)return {handled:false};
+    // Two handlers for one chat is a configuration conflict; never pick one silently.
+    if(handlers.length>1)throw Object.assign(fail('PLUGIN_FEATURE_CONFLICT'),{plugins:handlers.map(record=>record.id)});
+    const [record]=handlers,action=record.process.actions.find(action=>action.id===entry.action);validateValue(args,action.parameters);
+    const result=await this.invoke(record,'action',action.id,args,turn,options);
+    if(!this.active(record,turn.conversationKey,entry.permission))throw fail('PLUGIN_PERMISSION_DENIED');
+    return {handled:true,plugin:record.id,generation:record.generation,result};
   }
   async invoke(record,kind,name,args,turn,{signal,timeoutMs=35000,requireReply=false}={}){
     const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();

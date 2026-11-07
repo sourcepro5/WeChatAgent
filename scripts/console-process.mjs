@@ -43,7 +43,8 @@ export function runConsoleCommand(spec, onOutput, { cwd, env = process.env, time
   });
 }
 
-export function taskFailureMessage(output, code) {
+// inline：消息显示在概览状态卡等处（不在操作进度面板里），下方没有输出日志，改为指向运行日志页
+export function taskFailureMessage(output, code, { inline = false } = {}) {
   if (/CLIENT_PIN_SCOPE_REQUIRED|CLIENT_PIN_LINK_REFUSED/.test(output)) return '客户端保护仅支持项目 state/hook 下没有目录链接的独立微信。请检查连接设置中的微信路径。';
   if (/CLIENT_PIN_VERSION_MISMATCH|CLIENT_PIN_SIGNATURE_INVALID/.test(output)) return '客户端保护未启用：微信版本或腾讯数字签名不符合当前配置，请选择匹配的原版客户端。';
   if (/CLIENT_PIN_UPDATER_RUNNING/.test(output)) return '所选微信的更新器正在运行。请正常退出该微信及更新器，再开启保护。';
@@ -81,7 +82,7 @@ export function taskFailureMessage(output, code) {
   if (/Windows current-user credential decryption failed|Legacy secret requires/i.test(output)) return '已有凭据无法在当前电脑或 Windows 用户下读取。请在首次配置中点击“一键连接并验证”重新获取。';
   if (/Contact database could not be read|One or more message shards could not be read/i.test(output)) return '微信数据库尚未完整同步或暂时无法读取。请在微信打开几个聊天，等待同步后重新连接并验证。';
   if (/Reader initialization failed: (?:KeyError|FileNotFoundError)/i.test(output)) return '数据库读取设置尚未完成。请在首次配置中选择账号并点击“一键连接并验证”。';
-  if (/reader exited/i.test(output)) return '数据库读取器未能启动。请在首次配置中重新连接并验证微信；下方会显示读取器的具体错误。';
+  if (/reader exited/i.test(output)) return inline ? '数据库读取器未能启动。请在首次配置中重新连接并验证微信；具体错误见“设置 → 运行日志”。' : '数据库读取器未能启动。请在首次配置中重新连接并验证微信；下方会显示读取器的具体错误。';
   if (/HOOK_COMPONENT_UPDATE_PENDING/.test(output)) return '发送组件已更新。点击“修复微信连接”，核对并再次确认后重开匹配微信以应用更新。';
   if (/CouldNotAutoloadMatchingModule|Microsoft\.PowerShell\.Security.*module|Get-AuthenticodeSignature.*ObjectNotFound/is.test(output)) return 'Windows PowerShell 安全模块未能加载。请退出应用后重新打开更新后的 WeChatAgent.exe。';
   if (/WECHAT_LAUNCH_EXITED/i.test(output)) return '微信启动后已退出。若微信提示必须升级，当前固定版本的发送组件需要重新适配；请保留完整微信提示。';
@@ -94,5 +95,5 @@ export function taskFailureMessage(output, code) {
   if (/WeChat-Hook is not ready|BACKEND_UNAVAILABLE|Matching WeChat client missing/i.test(output)) return '匹配微信尚未就绪。点击“打开微信”，登录配置的账号后再启动。';
   if (/Install the DSH plugin|Fully.*reopen DSH|ECONNREFUSED.*11230/i.test(output)) return 'DSH 插件尚未就绪。打开 DSH，启用本项目插件并完整重开后再启动。';
   if (/Invalid project configuration|configuration.*failed/i.test(output)) return '项目配置无效，请检查连接设置与人格文件。';
-  return '操作未完成，请查看下方详细信息，修正配置后重试。';
+  return inline ? '读取服务上次未能正常运行，具体错误见“设置 → 运行日志”。' : '操作未完成，请查看下方详细信息，修正配置后重试。';
 }

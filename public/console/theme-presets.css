@@ -1,0 +1,527 @@
+/* ==========================================================================
+   WeChatAgent · 主题预设
+   预设由 theme-presets.js 写入 <html data-preset="…">，未设置时为默认的液态玻璃。
+   两个方舟预设共用一套"方舟界面系统"（html[data-ark]），活动预设再叠加一层皮肤：
+
+   罗德岛 · PRTS（data-preset=ark）——《明日方舟》游戏内界面语言
+     · 画内界面：主看板（独立主界面或嵌入概览，可切换）像 PRTS 投射在视野中的悬浮窗口，时间/状态放进同风格的 HUD 浮窗，随指针轻微视差
+     · 材质：亚克力般的深色毛玻璃面板，层级对比极高；关键面板用白底黑字，警示用黄黑斜纹
+     · 字体：标题思源宋体（Noto Serif SC），正文思源黑体（Noto Sans SC），技术文字用工业感的
+             伪等宽体 Bender（以 Windows 自带的 Bahnschrift 代替），拉丁展示字用古典衬线
+     · 中英并置：巨大的英文单词 + 中文标题，各处点缀临床风格的英文小字
+     · 底图：噪点与漫画网点、暗角、十字定位标；颜色以黑白灰为主，蓝、橙为辅
+     · 立体卡片：面板有厚度，右下露出侧面，关键面板背后垫错开的色块；可点的卡片浮起、随指针微倾，按下压回
+     · 动效：页面切换深色淡出淡入、内容横移淡入、标题乱码解码、按钮悬停黑白反相、
+             面板角落光线变化与飘浮尘埃
+   冻土与火种（data-preset=embers）—— 7.5 周年 · 2026 感谢庆典活动皮肤
+     · 主色换为余烬橙红，金色发丝线；灰烬飘落、火星上升、余烬辉光不规则闪烁、冷色雪雾；
+       参数取自活动页实测（灰烬 10–14s、辉光 13.4s、雪雾 17.1s、信号故障每 7.6s）
+   ========================================================================== */
+
+/* ---------- 预设选择器（所有预设通用，位于顶栏"更多"菜单内） ---------- */
+.preset-picker{display:flex;flex-direction:column;gap:2px;margin-top:6px;padding-top:8px;border-top:1px solid var(--lg-hair,var(--border))}
+.preset-picker>span{font-size:10px;letter-spacing:.12em;color:var(--muted);padding:2px 12px 4px}
+.preset-option{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 12px;border:0;border-radius:10px;background:transparent;color:var(--text);text-align:left;font-size:12px}
+.preset-option:hover{background:var(--lg-fill-hover,var(--surface-2))}
+.preset-option small{display:block;font-size:10px;color:var(--muted);margin-top:2px}
+.preset-swatch{width:26px;height:26px;flex-shrink:0;border-radius:8px;box-shadow:inset 0 0 0 1px rgb(255 255 255/.5),0 2px 6px -2px rgb(0 0 0/.3)}
+.preset-swatch.glass{background:radial-gradient(circle at 30% 25%,#fff,#cfe3d8 55%,#8fb7a2)}
+.preset-swatch.ark{background:linear-gradient(135deg,#f2f2f2 0 38%,#141517 38% 78%,#23ade5 78%)}
+.preset-swatch.embers{background:linear-gradient(135deg,#141517 0 45%,#e8562a 45% 62%,#c9b48a 62% 70%,#141517 70%)}
+.preset-swatch.layout-page{background:linear-gradient(90deg,#141517 0 42%,transparent 42%),repeating-linear-gradient(180deg,#f2f2f2 0 6px,#23ade5 6px 8px)}
+.preset-swatch.layout-overview{background:linear-gradient(90deg,#3a3b40 0 26%,transparent 26%),linear-gradient(180deg,#f2f2f2 0 38%,#141517 38% 48%,#2b2c30 48%)}
+html:not([data-ark]) .ark-layout-picker{display:none}
+.preset-option[aria-pressed=true]::after{content:'';margin-left:auto;width:8px;height:4px;border-left:2px solid var(--accent);border-bottom:2px solid var(--accent);transform:translateY(-2px) rotate(-45deg)}
+
+/* 仅方舟预设使用的元素，默认隐藏 */
+.ark-decor,.ark-hud,.ark-deck,.ark-home,.ark-home-link,.ark-transit{display:none}
+
+/* ==========================================================================
+   方舟界面系统（两个方舟预设共用）
+   前缀 html[data-ark][data-theme]：方舟预设固定深色底，theme-presets.js 激活时会同时切到深色；
+   多出的属性选择器用于在优先级上压过 liquid-glass.css 里 :root[data-theme=dark] 的规则。
+   ========================================================================== */
+html[data-ark][data-theme]{
+  color-scheme:dark;
+  /* 方舟色板 */
+  --ark-ink:#141517;--ark-panel:rgb(27 28 31/.84);--ark-panel-solid:#1d1e21;
+  --ark-white:#f2f2f2;--ark-black:#0d0d0e;
+  --ark-line:rgb(255 255 255/.12);--ark-line-strong:rgb(255 255 255/.3);
+  /* 深色面板的侧面：比底色亮一档的灰，厚度在深色背景上才看得出来 */
+  --ark-side:#26272b;--ark-side-hi:#323338;
+  --ark-blue:#23ade5;--ark-orange:#ff7a1a;--ark-yellow:#ffd400;--ark-red:#e5372c;
+  --ark-accent:var(--ark-blue);--ark-accent-hi:#6fd0f5;--ark-on-accent:#fff;
+  --ark-hazard:repeating-linear-gradient(-45deg,var(--ark-yellow) 0 7px,var(--ark-black) 7px 14px);
+  --ark-halftone:radial-gradient(circle,rgb(255 255 255/.09) 1px,transparent 1.4px) 0 0/6px 6px;
+  --ark-ease:cubic-bezier(.22,.61,.36,1);
+  --ark-snap:cubic-bezier(.2,.9,.25,1);
+  /* 字体：思源宋体 / 思源黑体 / Bender（Bahnschrift 代替）/ 古典衬线 */
+  --ark-serif:'Source Han Serif SC','Noto Serif SC','Songti SC','SimSun',serif;
+  --ark-sans:'Source Han Sans SC','Noto Sans SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif;
+  --ark-tech:'Bender','Bahnschrift','DIN Alternate','Segoe UI',sans-serif;
+  --ark-latin:'Trajan Pro','Palatino Linotype',Palatino,Georgia,serif;
+
+  /* 控制台令牌 */
+  --bg:var(--ark-ink);--surface:#1d1e21;--surface-2:#222326;--surface-3:#2b2c30;
+  --text:#ededed;--muted:#9a9ca1;--border:#2f3034;
+  --accent:var(--ark-accent);--accent-hover:var(--ark-accent-hi);--accent-soft:color-mix(in srgb,var(--ark-accent) 16%,transparent);--accent-text:var(--ark-accent-hi);
+  --ok:var(--ark-blue);--warn:var(--ark-yellow);--warn-soft:rgb(255 212 0/.1);--error:#ff5a4e;--error-soft:rgb(229 55 44/.14);
+  --on-accent:var(--ark-on-accent);--overlay:rgb(6 6 8/.7);--shadow:0 18px 40px -18px rgb(0 0 0/.85);--radius:0px;
+  --body-font:var(--ark-sans);--display-font:var(--ark-serif);--mono:var(--ark-tech);
+
+  /* 液态玻璃令牌 → 亚克力面板：直角、无折射、细白线 */
+  --lg-bg:var(--ark-ink);--lg-radius:0px;
+  --lg-tint:rgb(24 25 28/.78);--lg-tint-strong:rgb(26 27 30/.9);--lg-solid:rgb(29 30 33/.97);
+  --lg-card:var(--ark-panel);--lg-fill:rgb(255 255 255/.04);--lg-fill-hover:rgb(255 255 255/.08);
+  --lg-line:var(--ark-line-strong);--lg-line-soft:var(--ark-line);--lg-hair:rgb(255 255 255/.07);
+  --lg-glare:rgb(255 255 255/.05);--lg-sheen:transparent;--lg-rim-hi:rgb(255 255 255/.22);--lg-rim-lo:transparent;
+  --lg-blur:18px;--lg-sat:110%;--lg-inner:none;
+  --lg-drop:0 24px 50px -24px rgb(0 0 0/.9);--lg-drop-sm:0 12px 28px -18px rgb(0 0 0/.85);--lg-drop-xs:none;
+  --lg-well:inset 0 0 0 1px var(--ark-line);
+}
+html[data-ark][data-theme] body{background:var(--ark-ink);font-family:var(--ark-sans)}
+html[data-ark][data-theme] ::selection{background:var(--ark-accent);color:#fff}
+html[data-ark][data-theme] .motion-ambient{display:none}
+html[data-ark][data-theme] #theme-button{display:none} /* 方舟预设固定深色底，隐藏明暗切换 */
+
+/* ---------- 背景：暗角 · 网点 · 噪点 · 角落光线 · 飘浮尘埃 ---------- */
+html[data-ark][data-theme] .ark-decor{display:block;position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;contain:strict}
+.ark-decor>*{position:absolute;display:block}
+.ark-floor{inset:0;background:radial-gradient(120% 90% at 65% 30%,#26282c 0%,#17181b 55%,#0c0c0e 100%)}
+.ark-halftone{left:0;bottom:0;width:55vw;height:55vh;background:radial-gradient(circle,rgb(255 255 255/.14) 1.1px,transparent 1.6px) 0 0/7px 7px;mask:radial-gradient(farthest-side at 0 100%,#000,transparent)}
+.ark-stripes{right:0;top:0;width:45vw;height:40vh;background:repeating-linear-gradient(-60deg,rgb(255 255 255/.035) 0 2px,transparent 2px 12px);mask:radial-gradient(farthest-side at 100% 0,#000,transparent)}
+.ark-ray{right:-8vw;top:-20vh;width:60vw;height:80vh;background:conic-gradient(from 200deg at 85% 10%,transparent 0deg,rgb(255 255 255/.07) 8deg,transparent 18deg,rgb(255 255 255/.04) 26deg,transparent 40deg);filter:blur(6px);animation:ark-ray 9s ease-in-out infinite}
+.ark-noise{inset:-20px;opacity:.06;mix-blend-mode:overlay;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+.ark-vignette{inset:0;box-shadow:inset 0 0 180px 40px rgb(0 0 0/.75)}
+.ark-dust{left:var(--x);top:var(--y);width:var(--size,2px);height:var(--size,2px);border-radius:50%;background:#fff;opacity:0;filter:blur(.4px);animation:ark-dust var(--d,18s) linear var(--delay,0s) infinite}
+@keyframes ark-ray{0%,100%{opacity:.55}40%{opacity:1}55%{opacity:.7}70%{opacity:.95}}
+@keyframes ark-dust{0%{opacity:0;transform:translate(0,0)}20%,70%{opacity:.45}100%{opacity:0;transform:translate3d(var(--drift,30px),-90px,0)}}
+
+/* ---------- 侧边栏：PRTS 导航 ---------- */
+html[data-ark][data-theme] .sidebar{-webkit-backdrop-filter:blur(var(--lg-blur)) saturate(var(--lg-sat));backdrop-filter:blur(var(--lg-blur)) saturate(var(--lg-sat));border-radius:0;border-color:var(--ark-line);background-image:linear-gradient(180deg,rgb(255 255 255/.03),transparent 40%),var(--ark-halftone)}
+html[data-ark][data-theme] .brand{padding-bottom:18px;border-bottom:1px solid var(--ark-line);margin:0 6px 4px}
+html[data-ark][data-theme] .brand img{border-radius:0;box-shadow:0 0 0 1px var(--ark-line-strong)}
+html[data-ark][data-theme] .brand strong{font:700 15px/1.2 var(--ark-tech);letter-spacing:.06em;text-transform:uppercase}
+html[data-ark][data-theme] .brand span{font-family:var(--ark-serif)}
+html[data-ark][data-theme] .brand span::after{content:'RHODES ISLAND · PRTS';display:block;margin-top:4px;font:9px/1 var(--ark-tech);letter-spacing:.14em;color:var(--ark-accent);white-space:nowrap}
+html[data-ark][data-theme] .nav-caption{font:600 10px var(--ark-tech);letter-spacing:.24em;text-transform:uppercase;color:var(--muted)}
+html[data-ark][data-theme] .nav-caption::before{content:'PRTS // ';color:var(--ark-accent)}
+html[data-ark][data-theme] .sidebar nav a{border-radius:0;height:50px;color:#c9cbcf;transition:color .15s}
+html[data-ark][data-theme] .sidebar nav a:hover{background:rgb(255 255 255/.06);color:#fff}
+html[data-ark][data-theme] .sidebar nav a>span:not(.nav-count){display:flex;flex-direction:column;line-height:1.2;font:600 15px/1.2 var(--ark-serif)}
+html[data-ark][data-theme] .sidebar nav a>span:not(.nav-count)::before{display:block;font:600 9px/1.4 var(--ark-tech);letter-spacing:.2em;color:var(--muted)}
+html[data-ark][data-theme] .sidebar nav a[data-page=setup]>span:not(.nav-count)::before{content:'SETUP'}
+html[data-ark][data-theme] .sidebar nav a[data-page=overview]>span:not(.nav-count)::before{content:'TERMINAL'}
+html[data-ark][data-theme] .sidebar nav a[data-page=chats]>span:not(.nav-count)::before{content:'CHANNELS'}
+html[data-ark][data-theme] .sidebar nav a[data-page=roles]>span:not(.nav-count)::before{content:'OPERATOR'}
+html[data-ark][data-theme] .sidebar nav a[data-page=extensions]>span:not(.nav-count)::before{content:'MODULES'}
+html[data-ark][data-theme] .sidebar nav a[data-page=stickers]>span:not(.nav-count)::before{content:'DEPOT'}
+html[data-ark][data-theme] .sidebar nav a[data-page=memory]>span:not(.nav-count)::before{content:'ARCHIVES'}
+html[data-ark][data-theme] .sidebar nav a[data-page=settings]>span:not(.nav-count)::before{content:'SYSTEM'}
+/* 选中项：白底黑字的高对比色块 + 主色竖条（仍沿用 motion.js 的液态位移） */
+html[data-ark][data-theme] .sidebar nav a[aria-current=page]{color:var(--ark-black)}
+html[data-ark][data-theme] .sidebar nav a[aria-current=page]>span:not(.nav-count)::before{color:#55575c}
+html[data-ark][data-theme] .sidebar nav a[aria-current=page] .nav-count{color:var(--ark-black);box-shadow:inset 0 0 0 1px rgb(0 0 0/.4)}
+html[data-ark][data-theme] .motion-nav-indicator{border-radius:0;background:var(--ark-white);box-shadow:0 6px 18px -8px rgb(0 0 0/.9)}
+html[data-ark][data-theme] .motion-nav-indicator::before{left:0;top:0;width:4px;height:100%;margin-top:0;border-radius:0;background:var(--ark-accent);box-shadow:none}
+html[data-ark][data-theme] .motion-nav-indicator::after{content:'';position:absolute;right:8px;top:50%;width:0;height:0;margin-top:-4px;border-left:6px solid var(--ark-black);border-top:4px solid transparent;border-bottom:4px solid transparent}
+html[data-ark][data-theme] .nav-count{border-radius:0;font-family:var(--ark-tech);background:transparent;box-shadow:inset 0 0 0 1px var(--ark-line-strong)}
+html[data-ark][data-theme] .sidebar-bottom{border-top:1px solid var(--ark-line);margin:0 6px;padding:14px 6px 0}
+html[data-ark][data-theme] .sidebar-bottom .version,html[data-ark][data-theme] .local-label{font-family:var(--ark-tech);letter-spacing:.06em}
+
+/* ---------- 顶栏：HUD 浮窗 ---------- */
+html[data-ark][data-theme] .topbar{-webkit-backdrop-filter:blur(var(--lg-blur)) saturate(var(--lg-sat));backdrop-filter:blur(var(--lg-blur)) saturate(var(--lg-sat));border-radius:0;border-color:var(--ark-line)}
+html[data-ark][data-theme] .breadcrumb{font:600 11px var(--ark-tech);letter-spacing:.16em;text-transform:uppercase}
+html[data-ark][data-theme] .breadcrumb strong{font:600 14px var(--ark-serif);letter-spacing:.04em;text-transform:none;color:#fff}
+html[data-ark][data-theme] .separator{color:var(--ark-accent);opacity:1}
+html[data-ark][data-theme] .ark-hud{display:flex;align-items:center;gap:10px;margin-left:auto;margin-right:12px;font:600 11px var(--ark-tech);letter-spacing:.12em;color:var(--muted);white-space:nowrap}
+.ark-hud b{color:#fff;font-weight:600}
+.ark-hud i{display:inline-block;width:1px;height:14px;background:var(--ark-line-strong)}
+.ark-hud .ark-hud-live{display:flex;align-items:center;gap:6px;color:var(--ark-accent)}
+.ark-hud .ark-hud-live::before{content:'';width:6px;height:6px;background:currentColor;animation:ark-blink 1.6s steps(1) infinite}
+@keyframes ark-blink{50%{opacity:.2}}
+html[data-ark][data-theme] .connection-label{border-radius:0;font:600 11px var(--ark-tech);letter-spacing:.08em;background:transparent;box-shadow:inset 0 0 0 1px var(--ark-line-strong)}
+html[data-ark][data-theme] .connection-label::before{content:'[';color:var(--muted)}
+html[data-ark][data-theme] .connection-label::after{content:']';color:var(--muted)}
+html[data-ark][data-theme] .topbar-more>summary.button{border-radius:0}
+@media(max-width:1100px){html[data-ark][data-theme] .ark-hud .ark-hud-date{display:none}}
+@media(max-width:860px){html[data-ark][data-theme] .ark-hud{display:none}}
+
+/* ---------- 页面标题：巨大英文 + 宋体中文 + 编号与引导线 ---------- */
+html[data-ark][data-theme] .page-heading{position:relative;align-items:flex-end;padding:44px 0 16px;margin-bottom:22px;
+  background:linear-gradient(var(--ark-accent),var(--ark-accent)) 0 100%/56px 3px no-repeat,linear-gradient(var(--ark-line),var(--ark-line)) 0 calc(100% - 1px)/100% 1px no-repeat}
+html[data-ark][data-theme] .page-heading::before{content:attr(data-en);position:absolute;left:-2px;top:-8px;font:700 54px/1 var(--ark-tech);font-stretch:condensed;letter-spacing:.01em;color:#fff;white-space:nowrap;text-shadow:0 2px 18px rgb(0 0 0/.6)}
+html[data-ark][data-theme] .page-heading::after{content:attr(data-index);position:absolute;right:0;top:0;font:600 12px var(--ark-tech);letter-spacing:.2em;color:var(--muted)}
+html[data-ark][data-theme] .page-heading>div{padding-top:12px}
+html[data-ark][data-theme] #page-title{display:inline-flex;align-items:baseline;gap:12px;font:700 24px/1.3 var(--ark-serif);letter-spacing:.08em;color:#fff;background:none;-webkit-text-fill-color:currentColor}
+html[data-ark][data-theme] #page-title::after{content:attr(data-caption);font:600 10px var(--ark-tech);letter-spacing:.18em;color:var(--ark-accent);-webkit-text-fill-color:currentColor}
+html[data-ark][data-theme] #page-description{font-size:12px;color:var(--muted);margin-top:6px}
+html[data-ark][data-theme] #updated-label{font-family:var(--ark-tech);letter-spacing:.08em}
+html[data-ark][data-theme] body.has-wallpaper .page-heading{padding:44px 16px 16px;background-color:var(--lg-tint)}
+
+/* ---------- 卡片：亚克力面板 · 网点 · 十字定位标 ---------- */
+html[data-ark][data-theme] .card{position:relative;border-radius:0;border-color:var(--ark-line);background-color:var(--ark-panel);
+  background-image:radial-gradient(420px circle at var(--mx,50%) var(--my,50%),rgb(255 255 255/var(--ark-spot,0)),transparent 45%),radial-gradient(circle,rgb(255 255 255/.06) 1px,transparent 1.4px);
+  background-size:auto,6px 6px;box-shadow:var(--lg-drop-sm);--ark-spot:0}
+html[data-ark][data-theme] .card:hover{--ark-spot:.05;border-color:rgb(255 255 255/.22)}
+/* 左上十字定位标 */
+html[data-ark][data-theme] .card::before{content:'';position:absolute;left:-5px;top:-5px;width:9px;height:9px;pointer-events:none;
+  background:linear-gradient(#fff,#fff) 4px 0/1px 9px no-repeat,linear-gradient(#fff,#fff) 0 4px/9px 1px no-repeat;opacity:.6}
+/* 右上角的主色短条 + 小方块（"▬ ▪"） */
+html[data-ark][data-theme] .card::after{content:'';position:absolute;right:12px;top:-1px;width:44px;height:3px;pointer-events:none;
+  background:linear-gradient(var(--ark-accent),var(--ark-accent)) 0 0/30px 3px no-repeat,linear-gradient(var(--ark-accent),var(--ark-accent)) 36px 0/8px 3px no-repeat;transition:width .3s var(--ark-snap)}
+html[data-ark][data-theme] .card-header{padding-bottom:10px;border-bottom:1px solid var(--ark-line)}
+html[data-ark][data-theme] .card h2,html[data-ark][data-theme] .card-header h2{font:700 16px/1.4 var(--ark-serif);letter-spacing:.06em}
+html[data-ark][data-theme] .card-description{font-size:12px}
+html[data-ark][data-theme] .text-link{font-family:var(--ark-tech);letter-spacing:.06em}
+
+/* 主控卡：白底黑字的高对比面板（方舟里需要被注意的窗口常用这种处理） */
+html[data-ark][data-theme] .power-card{background-color:var(--ark-white);background-image:radial-gradient(circle,rgb(0 0 0/.07) 1px,transparent 1.4px);background-size:6px 6px;color:#141414;border-color:#fff}
+html[data-ark][data-theme] .power-card .eyebrow,html[data-ark][data-theme] .power-card p,html[data-ark][data-theme] .power-card .subtle{color:#55575c}
+html[data-ark][data-theme] .power-card h2{color:#0d0d0e;font:900 26px/1.3 var(--ark-serif)}
+html[data-ark][data-theme] .power-card .eyebrow{font:600 11px var(--ark-tech);letter-spacing:.18em;text-transform:uppercase}
+html[data-ark][data-theme] .power-card::before{background:linear-gradient(#000,#000) 4px 0/1px 9px no-repeat,linear-gradient(#000,#000) 0 4px/9px 1px no-repeat}
+html[data-ark][data-theme] .power-card::after{left:0;right:0;top:0;width:auto;height:6px;background:var(--ark-hazard)}
+html[data-ark][data-theme] .power-card:has(.power-control.active)::after{background:linear-gradient(90deg,var(--ark-accent),var(--ark-accent-hi))}
+html[data-ark][data-theme] .power-bottom{border-top-color:rgb(0 0 0/.12)}
+html[data-ark][data-theme] .power-card .button{background-color:#141414;color:#fff;border-color:#141414}
+html[data-ark][data-theme] .power-card .button:hover:not(:disabled){background-color:var(--ark-accent);border-color:var(--ark-accent);color:var(--ark-on-accent)}
+html[data-ark][data-theme] .power-card .status-tag{background:#141414;color:#fff}
+/* 主控按钮：带文字的方块按钮，下方附英文小字。未运行（或启动失败需重试）时"启动服务"是主操作，主色实心；
+   运行中"停止服务"为白底黑框，悬停黑白反相。厚度与按压见下方"立体卡片" */
+html[data-ark][data-theme] .power-control,html[data-ark][data-theme] .power-control.active{border-radius:0;height:52px;padding:0 20px 0 14px;gap:10px;border:1px solid #111;background:#fff;color:#111;font:700 14px/1 var(--ark-sans);letter-spacing:.1em;animation:none;filter:none;--ark-edge:#111;--ark-hl:transparent}
+html[data-ark][data-theme] .power-control[data-action=start]:not(:disabled){background:var(--ark-accent);border-color:color-mix(in srgb,var(--ark-accent) 55%,#000);color:var(--ark-on-accent);--ark-edge:color-mix(in srgb,var(--ark-accent) 38%,#000);--ark-hl:rgb(255 255 255/.35)}
+html[data-ark][data-theme] .power-control:hover:not(:disabled){background:#111;color:#fff;--ark-edge:#000}
+html[data-ark][data-theme] .power-control[data-action=start]:not(:disabled):hover{background:var(--ark-accent-hi);color:var(--ark-black);filter:none}
+html[data-ark][data-theme] .power-control::after{display:none}
+html[data-ark][data-theme] .power-control::before{border-radius:0}
+html[data-ark][data-theme] .power-control svg{filter:none}
+html[data-ark][data-theme] .power-control span{display:flex;flex-direction:column;gap:4px;text-align:left}
+html[data-ark][data-theme] .power-control span::after{font:600 9px/1 var(--ark-tech);letter-spacing:.24em;opacity:.65}
+html[data-ark][data-theme] .power-control[data-action=start] span::after{content:'ENGAGE'}
+html[data-ark][data-theme] .power-control[data-action=stop] span::after{content:'STANDBY'}
+
+/* 其他面板内元素 */
+html[data-ark][data-theme] .service-node{border-radius:0;background:rgb(0 0 0/.35);border-color:var(--ark-line);--ark-inset:inset 3px 0 0 var(--ark-line-strong)}
+html[data-ark][data-theme] .service-node strong{font-family:var(--ark-serif)}
+html[data-ark][data-theme] .service-node .port{font-family:var(--ark-tech);color:var(--ark-accent)}
+html[data-ark][data-theme] .service-node:not(:last-child)::after{background:linear-gradient(90deg,var(--border) 0 30%,var(--ark-accent) 50%,var(--border) 70% 100%) 0 0/300% 100%}
+html[data-ark][data-theme] .metric-label{font:600 11px var(--ark-tech);letter-spacing:.14em;text-transform:uppercase}
+html[data-ark][data-theme] .metric-value{font:600 40px/1 var(--ark-tech);font-stretch:condensed;letter-spacing:0;background:none;-webkit-text-fill-color:#fff;color:#fff}
+html[data-ark][data-theme] .metric-value span{font-family:var(--ark-serif)}
+/* 数值下方的分段刻度条，装饰性 */
+html[data-ark][data-theme] .metric-value::after{content:'';display:block;width:62%;height:4px;margin-top:10px;background:repeating-linear-gradient(90deg,var(--ark-accent) 0 7px,transparent 7px 10px)}
+html[data-ark][data-theme] .metric-note{font-family:var(--ark-tech);letter-spacing:.04em}
+html[data-ark][data-theme] .mode-option,html[data-ark][data-theme] .role-item,html[data-ark][data-theme] .chat-picker-item,html[data-ark][data-theme] .reader-steps span,html[data-ark][data-theme] .scope-tag{border-radius:0;background-color:rgb(0 0 0/.3);border-color:var(--ark-line)}
+html[data-ark][data-theme] .mode-option.selected,html[data-ark][data-theme] .role-item.selected,html[data-ark][data-theme] .chat-picker-item[aria-current=true]{background:var(--ark-white);color:#111;border-color:#fff;--ark-inset:inset 4px 0 0 var(--ark-accent)}
+html[data-ark][data-theme] .mode-option.selected span,html[data-ark][data-theme] .role-item.selected small,html[data-ark][data-theme] .chat-picker-item[aria-current=true] small,html[data-ark][data-theme] .chat-picker-item[aria-current=true] .chat-row-status{color:#55575c}
+html[data-ark][data-theme] .chat-picker-item strong,html[data-ark][data-theme] .role-item strong,html[data-ark][data-theme] .mode-option strong{font-family:var(--ark-serif)}
+html[data-ark][data-theme] .avatar{border-radius:0;background:#0d0d0e;color:#fff;box-shadow:inset 0 0 0 1px var(--ark-line-strong)}
+html[data-ark][data-theme] .chat-picker-item[aria-current=true] .avatar{background:#141414}
+html[data-ark][data-theme] .recent-row:hover{background:linear-gradient(90deg,rgb(255 255 255/.06),transparent)}
+html[data-ark][data-theme] .recent-meta{font-family:var(--ark-tech)}
+html[data-ark][data-theme] th{font:600 11px var(--ark-tech);letter-spacing:.12em;text-transform:uppercase;background:rgb(0 0 0/.3)}
+/* 状态标签：黑块白字，左侧色条表示状态 */
+html[data-ark][data-theme] .status-tag{border-radius:0;padding:4px 9px;background:var(--ark-black);color:#e8e8e8;font:600 11px var(--ark-tech);letter-spacing:.06em;box-shadow:inset 3px 0 0 var(--ark-line-strong)}
+html[data-ark][data-theme] .status-tag.ok{box-shadow:inset 3px 0 0 var(--ark-blue)}
+html[data-ark][data-theme] .status-tag.warn,html[data-ark][data-theme] .status-tag.warning{box-shadow:inset 3px 0 0 var(--ark-yellow)}
+html[data-ark][data-theme] .status-tag.error{box-shadow:inset 3px 0 0 var(--ark-red)}
+html[data-ark][data-theme] .dot.online{background:var(--ark-blue);box-shadow:0 0 6px var(--ark-blue)}
+html[data-ark][data-theme] .dot.warning{background:var(--ark-yellow)}
+html[data-ark][data-theme] .dot{border-radius:0}
+
+/* ---------- 按钮：直角、网点底、悬停黑白反相、主按钮带箭头 ---------- */
+html[data-ark][data-theme] .button{border-radius:0;border-color:var(--ark-line-strong);color:#f0f0f0;font-weight:600;letter-spacing:.04em;
+  background-color:rgb(255 255 255/.03);background-image:radial-gradient(circle,rgb(255 255 255/.08) 1px,transparent 1.4px);background-size:5px 5px;background-position:0 0;
+  box-shadow:none;transition:background-color .12s,border-color .12s,color .12s,transform .3s var(--ease-spring)}
+html[data-ark][data-theme] .button:hover:not(:disabled){background-color:var(--ark-white);border-color:var(--ark-white);color:#111;background-position:0 0;box-shadow:none}
+html[data-ark][data-theme] .button:active:not(:disabled){background-color:var(--ark-accent);border-color:var(--ark-accent);color:var(--ark-on-accent)}
+html[data-ark][data-theme] .button.primary{background-color:var(--ark-accent);border-color:var(--ark-accent);color:var(--ark-on-accent);background-image:radial-gradient(circle,rgb(255 255 255/.18) 1px,transparent 1.4px);box-shadow:4px 4px 0 -1px rgb(0 0 0/.5)}
+html[data-ark][data-theme] .button.primary::after{content:'';width:6px;height:6px;margin-left:4px;border-top:2px solid currentColor;border-right:2px solid currentColor;transform:rotate(45deg);transition:transform .3s var(--ark-snap)}
+html[data-ark][data-theme] .button.primary:hover:not(:disabled){background-color:var(--ark-white);border-color:var(--ark-white);color:#111}
+html[data-ark][data-theme] .button.primary:hover:not(:disabled)::after{transform:translateX(3px) rotate(45deg)}
+html[data-ark][data-theme] .button.danger{color:#ff6f63}
+html[data-ark][data-theme] .icon-button{border-radius:0}
+html[data-ark][data-theme] .icon-button:hover{background:var(--ark-white);color:#111;box-shadow:none}
+
+/* ---------- 分段控件 / 标签页：白色色块滑块 ---------- */
+html[data-ark][data-theme] .segmented{border-radius:0;background:rgb(0 0 0/.35);box-shadow:inset 0 0 0 1px var(--ark-line)}
+html[data-ark][data-theme] .segmented button,html[data-ark][data-theme] .workspace-tabs>a,html[data-ark][data-theme] .workspace-tabs>button{border-radius:0;font-weight:600;letter-spacing:.04em}
+html[data-ark][data-theme] .segmented>.lg-thumb{border-radius:0;background:var(--ark-white);box-shadow:inset 0 -3px 0 var(--ark-accent)}
+html[data-ark][data-theme] .lg-has-thumb.segmented>button.selected{color:#111}
+html[data-ark][data-theme] .workspace-tabs{border-bottom-color:var(--ark-line)}
+html[data-ark][data-theme] .workspace-tabs>.lg-thumb{border-radius:0;background:rgb(255 255 255/.08);box-shadow:inset 0 -3px 0 var(--ark-accent)}
+html[data-ark][data-theme] .lg-has-thumb.workspace-tabs>[aria-current=page],html[data-ark][data-theme] .lg-has-thumb.workspace-tabs>[aria-pressed=true]{color:#fff}
+
+/* ---------- 开关与输入 ---------- */
+html[data-ark][data-theme] .switch-track,html[data-ark][data-theme] .switch-track::after{border-radius:0}
+html[data-ark][data-theme] .switch-track{background:#2b2c30;box-shadow:inset 0 0 0 1px var(--ark-line-strong)}
+html[data-ark][data-theme] .switch-track::after{background:#cfd1d5;box-shadow:none}
+html[data-ark][data-theme] .switch-control input:checked+.switch-track{background:var(--ark-accent);box-shadow:none}
+html[data-ark][data-theme] .switch-control input:checked+.switch-track::after{background:#fff}
+html[data-ark][data-theme] .switch-control:active .switch-track::after,html[data-ark][data-theme] .switch-control:active input:checked+.switch-track::after{background:#fff;box-shadow:none}
+html[data-ark][data-theme] :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea){border-radius:0;background-color:rgb(0 0 0/.4);border-color:var(--ark-line);border-bottom-color:var(--ark-line-strong);box-shadow:none;color:#f0f0f0}
+html[data-ark][data-theme] :is(input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea):focus-visible{border-color:var(--ark-accent);background:rgb(0 0 0/.55);box-shadow:inset 0 -2px 0 var(--ark-accent)}
+html[data-ark][data-theme] input[type=number]{font-family:var(--ark-tech)}
+
+/* ---------- 横幅：警示斜纹 ---------- */
+html[data-ark][data-theme] .notice{border-radius:0;background-color:rgb(255 212 0/.08);color:var(--ark-yellow);border:1px solid rgb(255 212 0/.25);padding-left:26px;position:relative;box-shadow:none}
+html[data-ark][data-theme] .notice::before{content:'';position:absolute;left:0;top:0;bottom:0;width:12px;background:var(--ark-hazard)}
+html[data-ark][data-theme] .error-notice{background-color:rgb(229 55 44/.1);color:#ff7468;border-color:rgb(229 55 44/.3)}
+html[data-ark][data-theme] .error-notice::before{background:repeating-linear-gradient(-45deg,var(--ark-red) 0 7px,var(--ark-black) 7px 14px)}
+html[data-ark][data-theme] .notice.plain{background-color:rgb(255 255 255/.04);color:var(--muted);border-color:var(--ark-line)}
+html[data-ark][data-theme] .notice.plain::before{background:repeating-linear-gradient(-45deg,#5a5c61 0 7px,var(--ark-black) 7px 14px)}
+
+/* ---------- 弹窗：叠在模糊页面上的浮窗 ---------- */
+html[data-ark][data-theme] dialog{border-radius:0;border-color:var(--ark-line-strong);background-color:var(--lg-tint-strong);background-image:var(--ark-halftone);-webkit-backdrop-filter:blur(22px) saturate(110%);backdrop-filter:blur(22px) saturate(110%);box-shadow:0 0 0 1px #000,0 40px 90px -30px #000}
+html[data-ark][data-theme] dialog::before{content:'';position:sticky;display:block;top:-24px;margin:-24px -24px 18px;height:4px;background:linear-gradient(90deg,var(--ark-accent) 0 120px,var(--ark-line) 120px)}
+html[data-ark][data-theme] .modal-header h2{font:700 18px var(--ark-serif);letter-spacing:.06em}
+html[data-ark][data-theme] .modal-header h2::after{content:'PRTS // TERMINAL NOTICE';display:block;margin-top:4px;font:600 9px var(--ark-tech);letter-spacing:.22em;color:var(--muted)}
+html[data-ark][data-theme] dialog[open]::backdrop{background-color:rgb(6 6 8/.62);-webkit-backdrop-filter:blur(8px) grayscale(.5);backdrop-filter:blur(8px) grayscale(.5)}
+
+/* ---------- 菜单、提示、保存栏、进度面板 ---------- */
+html[data-ark][data-theme] .action-menu>div{border-radius:0;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+html[data-ark][data-theme] .action-menu>div>button,html[data-ark][data-theme] .topbar-more>div .button,html[data-ark][data-theme] .preset-option{border-radius:0}
+html[data-ark][data-theme] .action-menu>div>button:hover,html[data-ark][data-theme] .preset-option:hover{background:var(--ark-white);color:#111}
+html[data-ark][data-theme] .preset-option:hover small{color:#55575c}
+html[data-ark][data-theme] .preset-swatch{border-radius:0}
+html[data-ark][data-theme] .toast{border-radius:0;color:#f0f0f0;background-color:rgb(13 13 14/.94);background-image:none;border:1px solid var(--ark-line-strong);box-shadow:inset 4px 0 0 var(--ark-accent),0 20px 40px -16px #000;font-family:var(--ark-sans)}
+html[data-ark][data-theme] .save-bar{border-radius:0;border-color:var(--ark-line-strong);padding-left:30px;-webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px)}
+html[data-ark][data-theme] .save-bar::before{inset:0 auto 0 0;width:14px;padding:0;mask:none;-webkit-mask:none;background:var(--ark-hazard)}
+html[data-ark][data-theme] .save-bar strong{font-family:var(--ark-serif)}
+html[data-ark][data-theme] .job-panel{border-radius:0;border-top:3px solid var(--ark-accent)}
+html[data-ark][data-theme] ::-webkit-scrollbar-thumb{border-radius:0;background-color:rgb(255 255 255/.2)}
+html[data-ark][data-theme] ::-webkit-scrollbar-thumb:hover{background-color:var(--ark-accent)}
+
+/* ---------- 主看板：PRTS 投射的倾斜大方块 ----------
+   两种布局，在顶栏"更多 → 主看板"切换（theme-presets.js 保存选择）：
+   · 独立主界面（默认，#prts）：像游戏的主界面，占满窗口并隐藏侧边栏与工作区，不与侧边栏的导航同时出现；
+     左侧是时间、服务状态与关键数字，右侧是系统入口；侧边栏顶部的"主界面"进入，Esc 或"控制台"方块返回
+   · 嵌入概览：概览页顶部的一排快捷方块
+   两种布局共用 .ark-tile 的样式，只有摆放不同。 */
+
+/* 嵌入概览：以左缘为轴向内转，右侧远离视线；左侧大块 + 右侧主色竖块，共 4×2 格 */
+html[data-ark][data-theme] .ark-deck{display:block;perspective:1300px;margin:0 0 20px}
+.ark-deck[hidden]{display:none!important}
+.ark-deck-grid{display:grid;grid-template-columns:1.4fr 1fr 1fr .85fr;grid-template-rows:96px 96px;gap:8px;padding:0 10px 12px 0;transform-origin:0 50%;
+  transform:rotateY(calc(9deg + var(--ark-px,0) * 3deg)) rotateX(calc(1.5deg - var(--ark-py,0) * 2deg));transition:transform .8s var(--ark-ease)}
+.ark-deck-grid .ark-tile{padding:12px 14px}
+.ark-deck-grid .ark-tile.is-main{grid-row:1/3}
+.ark-deck-grid .ark-tile.is-accent{grid-column:4;grid-row:1/3}
+.ark-deck-grid .ark-tile.is-main .ark-tile-en{font-size:52px}
+.ark-deck-grid .ark-tile.is-main svg{width:70px;height:70px}
+.ark-deck-grid .ark-tile-desc{display:none}
+.ark-deck-caption{display:flex;justify-content:space-between;margin-top:10px;font:600 10px var(--ark-tech);letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.ark-deck-caption b{color:var(--ark-accent);font-weight:600}
+@media(max-width:860px){.ark-deck-grid{grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,84px);transform:none}.ark-deck-grid .ark-tile.is-main{grid-row:auto;grid-column:1/-1}.ark-deck-grid .ark-tile.is-accent{grid-column:auto;grid-row:auto}.ark-deck-grid .ark-tile:last-child{grid-column:1/-1}.ark-deck-grid .ark-tile .ark-tile-en{font-size:24px}.ark-deck-grid .ark-tile.is-main .ark-tile-en{font-size:30px}.ark-deck-caption>span:last-child{display:none}}
+
+/* 独立主界面 */
+html[data-ark][data-theme] .ark-home{display:grid;position:fixed;inset:0;z-index:40;grid-template-columns:minmax(300px,.75fr) minmax(0,1.6fr);grid-template-rows:56px 1fr auto;gap:0 56px;padding:0 56px 26px;overflow:auto}
+.ark-home[hidden]{display:none!important}
+html[data-ark][data-theme] body.ark-home-open :is(.sidebar,.workspace,.save-bar){visibility:hidden}
+.ark-home-bar{grid-column:1/-1;display:flex;align-items:center;gap:14px;font:600 10px var(--ark-tech);letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.ark-home-bar img{width:28px;height:28px;box-shadow:0 0 0 1px var(--ark-line-strong)}
+.ark-home-bar strong{display:block;font:700 14px/1.2 var(--ark-tech);letter-spacing:.08em;color:#fff}
+.ark-home-bar .ark-hud-live{margin-left:auto}
+/* 桌面应用：顶部一条可拖动窗口，右侧让出原生窗口按钮 */
+body.desktop-mode .ark-home-bar{-webkit-app-region:drag;user-select:none;padding-right:150px}
+.ark-home-status{display:flex;flex-direction:column;justify-content:center;gap:26px;min-width:0}
+.ark-home-greet span{display:block;font:600 11px var(--ark-tech);letter-spacing:.3em;color:var(--ark-accent)}
+.ark-home-greet strong{display:block;margin-top:8px;font:700 26px/1.3 var(--ark-serif);letter-spacing:.12em;color:#fff}
+.ark-home-clock{display:flex;align-items:baseline;gap:10px;font:700 104px/.9 var(--ark-tech);font-stretch:condensed;color:#fff;letter-spacing:-.01em;text-shadow:0 4px 30px rgb(0 0 0/.6)}
+.ark-home-clock small{font-size:28px;color:var(--ark-accent)}
+.ark-home-date{margin-top:-14px;font:600 12px var(--ark-tech);letter-spacing:.24em;color:var(--muted)}
+/* 服务状态：一块薄板，左侧条随状态变化（未就绪为警示斜纹，全部正常为主色）；点击进入控制台 */
+.ark-home-service{position:relative;display:block;padding:16px 18px 16px 24px;background:var(--ark-panel);border:1px solid var(--ark-line);text-decoration:none;color:inherit}
+.ark-home-service::before{content:'';position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--ark-hazard)}
+.ark-home-service[data-state=ok]::before{background:var(--ark-accent)}
+.ark-home-service span{display:block;font:600 10px var(--ark-tech);letter-spacing:.24em;color:var(--muted)}
+.ark-home-service strong{display:block;margin:6px 0 4px;font:700 18px/1.3 var(--ark-serif);letter-spacing:.06em;color:#fff}
+.ark-home-service em{font:600 11px var(--ark-tech);font-style:normal;letter-spacing:.08em;color:var(--ark-accent-hi)}
+.ark-home-service:hover{border-color:var(--ark-line-strong)}
+.ark-home-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0;border-top:1px solid var(--ark-line)}
+.ark-home-stats>div{padding:12px 12px 0 0;margin-right:12px;border-right:1px solid var(--ark-line)}
+.ark-home-stats>div:last-child{border-right:0;margin-right:0}
+.ark-home-stats dt{font:600 10px var(--ark-sans);letter-spacing:.12em;color:var(--muted)}
+.ark-home-stats dd{margin:6px 0 0;font:700 30px/1 var(--ark-tech);font-stretch:condensed;color:#fff}
+.ark-home-stats dd small{margin-left:3px;font:600 11px var(--ark-serif);color:var(--muted)}
+/* 入口：以右缘为轴向内转，左侧远离视线，像投射在视野右前方的悬浮面板；随指针轻微视差 */
+.ark-home-main{align-self:center;perspective:1400px;min-width:0}
+.ark-home-grid{display:grid;grid-template-columns:1.35fr 1fr 1fr;grid-template-rows:repeat(3,minmax(108px,15vh));gap:10px;padding:0 10px 12px 0;transform-origin:100% 50%;
+  transform:rotateY(calc(-9deg + var(--ark-px,0) * 3deg)) rotateX(calc(1.5deg - var(--ark-py,0) * 2deg));transition:transform .8s var(--ark-ease)}
+.ark-tile{position:relative;display:flex;flex-direction:column;justify-content:flex-end;padding:14px 16px;overflow:hidden;text-decoration:none;color:#f0f0f0;
+  background:rgb(22 23 26/.9);border:1px solid var(--ark-line);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+.ark-tile.is-main{background:var(--ark-white);color:#111;border-color:#fff}
+.ark-home-grid .ark-tile.is-main{grid-column:1;grid-row:1/3}
+.ark-home-grid .ark-tile.is-wide{grid-column:2/4}
+.ark-tile.is-accent{background:var(--ark-accent);color:var(--ark-on-accent);border-color:var(--ark-accent)}
+.ark-tile .ark-tile-en{font:700 30px/1 var(--ark-tech);font-stretch:condensed;letter-spacing:.01em;text-transform:uppercase}
+.ark-home-grid .ark-tile.is-main .ark-tile-en{font-size:60px}
+.ark-tile .ark-tile-cn{font:700 14px/1.3 var(--ark-serif);letter-spacing:.1em;margin-top:6px}
+.ark-tile .ark-tile-desc{margin-top:4px;font-size:11px;opacity:.6}
+.ark-tile .ark-tile-no{position:absolute;left:16px;top:12px;font:600 10px var(--ark-tech);letter-spacing:.2em;opacity:.7}
+.ark-tile .ark-tile-meta{position:absolute;right:16px;top:12px;font:600 10px var(--ark-tech);letter-spacing:.14em;opacity:.75}
+.ark-tile svg{position:absolute;right:14px;bottom:14px;width:36px;height:36px;opacity:.22;stroke-width:1.4}
+.ark-tile.is-main svg{width:84px;height:84px;opacity:.12}
+.ark-tile::after{content:'';position:absolute;right:0;top:0;width:0;height:0;border-top:14px solid currentColor;border-left:14px solid transparent;opacity:.35}
+.ark-tile:hover{background:var(--ark-white);color:#111;border-color:#fff}
+.ark-tile.is-main:hover{background:var(--ark-accent);color:var(--ark-on-accent);border-color:var(--ark-accent)}
+.ark-home-caption{grid-column:1/-1;display:flex;justify-content:space-between;gap:16px;padding-top:14px;border-top:1px solid var(--ark-line);font:600 10px var(--ark-tech);letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.ark-home-caption b{color:var(--ark-accent);font-weight:600}
+/* 侧边栏顶部的"主界面"入口（不放进导航列表，免得打乱导航的编号与滑块） */
+html[data-ark][data-theme] .ark-home-link{display:flex;align-items:center;justify-content:space-between;margin:0 6px 12px;padding:9px 12px;border:1px solid var(--ark-line);background:rgb(0 0 0/.25);font:600 10px var(--ark-tech);letter-spacing:.22em;color:var(--muted);text-decoration:none;transition:background-color .12s,color .12s}
+.ark-home-link b{font:700 13px var(--ark-serif);letter-spacing:.1em;color:#fff}
+html[data-ark][data-theme] .ark-home-link:hover{background:var(--ark-white);color:#55575c}
+html[data-ark][data-theme] .ark-home-link:hover b{color:#111}
+@media(max-width:1000px){
+  html[data-ark][data-theme] .ark-home{grid-template-columns:1fr;grid-template-rows:56px auto auto auto;gap:24px;padding:0 24px 20px}
+  .ark-home-grid{transform:none}
+  .ark-home-clock{font-size:72px}
+}
+@media(max-width:640px){
+  .ark-home-grid{grid-template-columns:1fr 1fr;grid-template-rows:none;grid-auto-rows:92px}
+  .ark-home-grid .ark-tile.is-main,.ark-home-grid .ark-tile.is-wide{grid-column:1/-1;grid-row:auto}
+  .ark-home-grid .ark-tile.is-main .ark-tile-en{font-size:36px}
+  .ark-home-grid .ark-tile .ark-tile-en{font-size:22px}
+  .ark-home-caption>span:last-child{display:none}
+}
+
+/* ---------- 立体卡片：厚度 · 错位色块 · 浮起即可点 ----------
+   方舟的面板是一块块有厚度的板子：光从左上来，右下露出侧面；关键面板背后再垫一块错开的主色板。
+   能点的卡片悬停时浮起并随指针微倾，按下时压回底座；只容纳内容或表单的面板保持薄板，不浮起。
+   · 厚度 --ark-d：box-shadow 逐级堆出侧面；--ark-d0 为静止厚度，各类卡片在下面分别设置
+   · 位移 = d0 − d：浮起（d 变大）时面板向左上移、侧面底边不动，像面板离开底座；按下时反之
+   · 错位色块 --ark-plate 的偏移同样以 d 计算，所以色块留在底座上，不随面板移动
+   · 倾斜角 --ark-rx / --ark-ry 由 theme-presets.js 写入（指针所在的一侧下沉） */
+/* 注册为类型化属性，厚度与倾斜角本身可以过渡；侧面阴影与 transform 由它们算出，不再单独过渡 */
+@property --ark-d{syntax:'<length>';inherits:false;initial-value:0px}
+@property --ark-rx{syntax:'<angle>';inherits:false;initial-value:0deg}
+@property --ark-ry{syntax:'<angle>';inherits:false;initial-value:0deg}
+/* 侧面阴影写在 :not(#ark-slab) 下：抬高优先级，压过各模块为这些元素写的阴影（选中、悬停等），
+   那些状态在方舟预设里改为设置 --ark-inset / --ark-edge 等变量 */
+html[data-ark][data-theme] :is(.card,.ark-tile,.ark-home-service,.role-item,.chat-picker-item,.mode-option,.sticker-card,.extension-tile,.service-node,.power-control):not(#ark-slab){
+  box-shadow:var(--ark-inset,0 0 #0000),inset 1px 1px 0 var(--ark-hl,rgb(255 255 255/.08)),
+    calc(var(--ark-d)*.2) calc(var(--ark-d)*.2) 0 var(--ark-edge),calc(var(--ark-d)*.4) calc(var(--ark-d)*.4) 0 var(--ark-edge),
+    calc(var(--ark-d)*.6) calc(var(--ark-d)*.6) 0 var(--ark-edge),calc(var(--ark-d)*.8) calc(var(--ark-d)*.8) 0 var(--ark-edge),
+    var(--ark-d) var(--ark-d) 0 var(--ark-edge),var(--ark-plate,0 0 #0000),
+    calc(var(--ark-d)*1.5 + 4px) calc(var(--ark-d)*2 + 8px) 26px -12px rgb(0 0 0/.8)}
+html[data-ark][data-theme] :is(.card,.ark-tile,.ark-home-service,.role-item,.chat-picker-item,.mode-option,.sticker-card,.extension-tile,.service-node,.power-control){--ark-d0:3px;--ark-d:var(--ark-d0);--ark-edge:var(--ark-side)}
+
+/* 可交互的卡片：静止时就有厚度，悬停浮起 3px，按下压到 1px */
+html[data-ark][data-theme] :is(.ark-tile,.ark-home-service,.power-card,.role-item,.chat-picker-item,.mode-option,.sticker-card,.extension-tile,.power-control),html[data-ark][data-theme] .metrics>.card{
+  --ark-d0:5px;position:relative;
+  transform:perspective(800px) rotateX(var(--ark-rx)) rotateY(var(--ark-ry)) translate(calc(var(--ark-d0) - var(--ark-d)),calc(var(--ark-d0) - var(--ark-d)));
+  transition:--ark-d .45s var(--ark-snap),--ark-rx .5s var(--ark-snap),--ark-ry .5s var(--ark-snap),background-color .15s,color .15s,border-color .15s}
+html[data-ark][data-theme] :is(.role-item,.chat-picker-item,.mode-option){--ark-d0:4px}
+/* 选中：白色面板保持浮起，侧面换成主色 */
+html[data-ark][data-theme] :is(.role-item.selected,.mode-option.selected,.chat-picker-item[aria-current=true]){--ark-d:calc(var(--ark-d0) + 2px);--ark-edge:var(--ark-accent);--ark-hl:#fff;z-index:1}
+html[data-ark][data-theme] :is(.ark-tile,.ark-home-service,.power-card,.role-item,.chat-picker-item,.mode-option,.sticker-card,.extension-tile,.power-control):hover:not(:disabled),html[data-ark][data-theme] .metrics>.card:hover{--ark-d:calc(var(--ark-d0) + 3px);z-index:2}
+/* 按压只给整块可点的元素；容器类卡片（主控卡、指标卡、表情、扩展）内部有按钮，点按钮时不应整块下沉 */
+html[data-ark][data-theme] :is(.ark-tile,.ark-home-service,.role-item,.chat-picker-item,.mode-option,.power-control):active:not(:disabled){--ark-d:1px;transition-duration:.08s}
+/* 跟随指针时缩短倾斜的过渡，离开后再慢慢回正 */
+html[data-ark][data-theme] .ark-tilting{transition:--ark-d .45s var(--ark-snap),--ark-rx .12s ease-out,--ark-ry .12s ease-out,background-color .15s,color .15s,border-color .15s}
+
+/* 主控卡：白色厚板，侧面灰色，背后垫一块错开的主色板（运行正常时变为主色，未运行时为警示黄） */
+html[data-ark][data-theme] .power-card{--ark-d0:7px;--ark-edge:#8d8f95;--ark-hl:#fff;
+  --ark-plate:calc(var(--ark-d) + 8px) calc(var(--ark-d) + 8px) 0 -2px var(--ark-plate-color,var(--ark-yellow))}
+html[data-ark][data-theme] .power-card:has(.power-control.active){--ark-plate-color:var(--ark-accent)}
+html[data-ark][data-theme] .metrics>.card{--ark-edge:var(--ark-side-hi)}
+html[data-ark][data-theme] .metrics>.card:hover{--ark-edge:color-mix(in srgb,var(--ark-accent) 55%,#000)}
+/* 主界面入口：白块与主色块各有同色系的侧面，左上大块背后垫主色板 */
+html[data-ark][data-theme] .ark-tile{--ark-d0:6px;--ark-edge:var(--ark-side-hi)}
+html[data-ark][data-theme] .ark-tile.is-main{--ark-edge:#8d8f95;--ark-hl:#fff;--ark-plate:calc(var(--ark-d) + 7px) calc(var(--ark-d) + 7px) 0 -2px var(--ark-accent)}
+html[data-ark][data-theme] .ark-tile.is-accent{--ark-edge:color-mix(in srgb,var(--ark-accent) 40%,#000);--ark-hl:rgb(255 255 255/.4)}
+html[data-ark][data-theme] .ark-tile:hover{--ark-edge:#8d8f95;--ark-hl:#fff}
+html[data-ark][data-theme] .ark-tile.is-main:hover{--ark-edge:color-mix(in srgb,var(--ark-accent) 40%,#000)}
+
+/* 人格列表：干员卡式——左侧分段"稀有度"条、右下大号编号；选中时白底，编号转深 */
+html[data-ark][data-theme] .role-list{counter-reset:ark-opr;padding:0 9px 9px 0}
+html[data-ark][data-theme] .role-item{counter-increment:ark-opr;overflow:hidden;padding-left:18px;padding-right:54px}
+html[data-ark][data-theme] .role-item::before{content:counter(ark-opr,decimal-leading-zero);position:absolute;right:8px;bottom:-5px;font:700 38px/1 var(--ark-tech);font-stretch:condensed;color:rgb(255 255 255/.09);pointer-events:none;transition:color .15s}
+html[data-ark][data-theme] .role-item::after{content:'';position:absolute;left:6px;top:10px;bottom:10px;width:3px;background:repeating-linear-gradient(180deg,var(--ark-line-strong) 0 6px,transparent 6px 9px);pointer-events:none}
+html[data-ark][data-theme] .role-item:hover::before{color:rgb(255 255 255/.18)}
+html[data-ark][data-theme] .role-item.selected::before{color:rgb(0 0 0/.14)}
+html[data-ark][data-theme] .role-item.selected::after{background:repeating-linear-gradient(180deg,var(--ark-accent) 0 6px,transparent 6px 9px)}
+/* 聊天列表可滚动：右侧与底部留出侧面的位置，免得被滚动区域裁掉 */
+html[data-ark][data-theme] .chat-picker-list{padding:2px 9px 9px 2px;gap:8px}
+html[data-ark][data-theme] .chat-picker-item{border-color:var(--ark-line);background-color:rgb(0 0 0/.3)}
+html[data-ark][data-theme] .mode-selector{gap:12px;padding:0 6px 6px 0}
+/* 表情与扩展：仓库物品卡，底部名牌 */
+html[data-ark][data-theme] .sticker-card,html[data-ark][data-theme] .extension-tile{border-radius:0;border-color:var(--ark-line);background-color:var(--ark-panel)}
+html[data-ark][data-theme] .sticker-card:hover,html[data-ark][data-theme] .extension-tile:hover{border-color:var(--ark-line-strong);--ark-edge:color-mix(in srgb,var(--ark-accent) 55%,#000)}
+html[data-ark][data-theme] .sticker-card-body{border-top:3px solid var(--ark-accent);background:rgb(0 0 0/.35)}
+html[data-ark][data-theme] .sticker-card-body h3{font-family:var(--ark-serif)}
+html[data-ark][data-theme] .extension-tile{border-top:3px solid var(--ark-line-strong)}
+html[data-ark][data-theme] .extension-tile:hover{border-top-color:var(--ark-accent)}
+
+/* 入场：卡片像被"发"到桌面上——从左下带一点纵深旋转落下，厚度随之升起 */
+html[data-ark][data-theme] .card.motion-enter{animation:ark-deal .7s var(--ark-snap) both;animation-delay:calc(var(--motion-i,0) * 60ms + 120ms)}
+@keyframes ark-deal{
+  from{opacity:0;--ark-d:0px;transform:perspective(800px) rotateX(18deg) rotateY(-12deg) translate(-24px,26px) rotate(-1.5deg)}
+  55%{opacity:1}
+  to{opacity:1;transform:perspective(800px) rotateX(0deg) rotateY(0deg) translate(0,0) rotate(0deg)}}
+
+/* ---------- 页面切换：深色淡出淡入（独立系统之间） ---------- */
+html[data-ark][data-theme] .ark-transit{display:flex;position:fixed;inset:0;z-index:70;pointer-events:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:var(--ark-ink);opacity:0;visibility:hidden}
+html[data-ark][data-theme] .ark-transit.is-playing{visibility:visible;animation:ark-transit .62s var(--ark-ease) both}
+.ark-transit strong{font:700 40px/1 var(--ark-tech);font-stretch:condensed;letter-spacing:.2em;color:#fff}
+.ark-transit span{font:600 10px var(--ark-tech);letter-spacing:.3em;color:var(--muted)}
+.ark-transit i{display:block;width:220px;height:2px;background:linear-gradient(var(--ark-accent),var(--ark-accent)) 0 0/0 100% no-repeat,var(--ark-line)}
+.ark-transit.is-playing i{animation:ark-load .5s var(--ark-ease) both}
+@keyframes ark-transit{0%{opacity:0}22%,58%{opacity:1}100%{opacity:0;visibility:hidden}}
+@keyframes ark-load{from{background-size:0 100%,auto}to{background-size:100% 100%,auto}}
+
+/* ---------- 入场：横移淡入（替换 motion.css 的纵向浮起） ---------- */
+html[data-ark][data-theme] .motion-enter{animation:ark-enter .6s var(--ark-snap) both;animation-delay:calc(var(--motion-i,0) * 55ms + 120ms)}
+html[data-ark][data-theme] .motion-soft{animation:ark-enter-soft .35s var(--ark-snap) both}
+html[data-ark][data-theme] .page-heading.motion-enter h1,html[data-ark][data-theme] .page-heading.motion-enter p{animation:ark-enter .6s var(--ark-snap) both}
+html[data-ark][data-theme] :is(.ark-deck,.ark-home):not([hidden]) .ark-tile{animation:ark-unfold .55s var(--ark-snap) backwards;animation-delay:calc(var(--i,0) * 60ms + 180ms)}
+@keyframes ark-enter{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:none}}
+@keyframes ark-enter-soft{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+/* 裁切区域向外留出余量，展开过程中厚度与投影不被裁掉；只回填开始前的状态，结束后不再裁切 */
+@keyframes ark-unfold{from{opacity:0;clip-path:inset(-12px 100% -48px -12px);--ark-d:0px}to{opacity:1;clip-path:inset(-12px -48px -48px -12px)}}
+html[data-ark][data-theme] body.ark-boot .sidebar nav a,html[data-ark][data-theme] body.ark-boot .brand,html[data-ark][data-theme] body.ark-boot .nav-caption{animation:ark-enter .55s var(--ark-snap) both;animation-delay:calc(var(--motion-i,0) * 50ms + 150ms)}
+
+/* 预设切换：水平擦除转场（配合 View Transitions） */
+html.preset-switching::view-transition-old(root),html.preset-switching::view-transition-new(root){animation:none;mix-blend-mode:normal}
+
+/* ==========================================================================
+   活动皮肤：冻土与火种（在方舟界面系统之上）
+   ========================================================================== */
+html[data-preset=embers][data-theme]{
+  --ark-accent:#e8562a;--ark-accent-hi:#ff9d38;--ark-on-accent:#140a05;
+  --ark-gold:#c9b48a;--ark-mist:#8f8fb3;
+  --ark-line-strong:rgb(201 180 138/.36);
+  --lg-glare:rgb(255 130 60/.08);
+}
+html[data-preset=embers][data-theme] .ark-floor{background:radial-gradient(120% 90% at 30% 85%,#2a1810 0%,#16120f 45%,#0b0b0d 100%)}
+html[data-preset=embers][data-theme] .brand span::after{content:'FROZEN SOIL & EMBERS';color:var(--ark-gold)}
+html[data-preset=embers][data-theme] .nav-caption::before{color:var(--ark-accent)}
+html[data-preset=embers][data-theme] .card::before{background:linear-gradient(var(--ark-gold),var(--ark-gold)) 4px 0/1px 9px no-repeat,linear-gradient(var(--ark-gold),var(--ark-gold)) 0 4px/9px 1px no-repeat}
+html[data-preset=embers][data-theme] .page-heading::before{text-shadow:0 2px 18px rgb(0 0 0/.6),0 0 30px rgb(232 86 42/.25)}
+html[data-preset=embers][data-theme] .page-heading.motion-enter h1,html[data-preset=embers][data-theme] #page-title{animation:ark-enter .6s var(--ark-snap) both,ak-glitch 7.6s ease-in-out 3s infinite}
+@keyframes ak-glitch{0%,21%,100%{opacity:1;transform:none;filter:none}10.5%{opacity:.65;transform:translateX(3.75px);filter:drop-shadow(-2px 0 rgb(255 70 40/.7)) drop-shadow(2px 0 rgb(92 198 224/.5))}}
+/* 活动氛围：余烬辉光、雪雾、灰烬、火星、像素碎片 */
+.ak-glow,.ak-mist,.ak-pixels,.ak-ash{display:none}
+html[data-preset=embers][data-theme] .ak-glow,html[data-preset=embers][data-theme] .ak-mist,html[data-preset=embers][data-theme] .ak-pixels,html[data-preset=embers][data-theme] .ak-ash{display:block}
+html[data-preset=embers][data-theme] .ark-ray{opacity:.5}
+.ak-glow{left:-12vmax;bottom:-18vmax;width:70vmax;height:60vmax;border-radius:50%;background:radial-gradient(closest-side,rgb(255 157 56/.3),rgb(230 95 21/.13) 42%,transparent 72%);animation:ak-flicker 13.4s ease-in-out infinite}
+.ak-mist{right:-14vmax;top:-16vmax;width:64vmax;height:50vmax;border-radius:50%;background:radial-gradient(closest-side,rgb(143 143 179/.2),rgb(110 112 150/.08) 50%,transparent 75%);animation:ak-mist 17.1s ease-in-out infinite}
+.ak-pixels{right:0;bottom:0;width:300px;height:200px;background:repeating-conic-gradient(rgb(232 86 42/.5) 0 25%,transparent 0 50%) 0 0/10px 10px;mask:radial-gradient(farthest-side at 100% 100%,#000,transparent 75%);opacity:.45}
+.ak-ash{left:var(--x);top:var(--y);width:var(--size,2px);height:var(--size,2px);background:#e4dfd6;opacity:0;animation:ak-fall var(--d,12s) linear var(--delay,0s) infinite}
+.ak-ash.spark{background:var(--ark-accent-hi,#ff9d38);box-shadow:0 0 6px 1px rgb(255 120 40/.7);animation-name:ak-rise}
+@keyframes ak-flicker{0%{opacity:.24}9%{opacity:.34}17%{opacity:.95}21%{opacity:.48}29%{opacity:.66}40%{opacity:.26}53%{opacity:.36}61%{opacity:1}67%{opacity:.54}74%{opacity:.78}86%{opacity:.3}100%{opacity:.24}}
+@keyframes ak-mist{0%,100%{transform:translate(-13.5px,3px)}28%{transform:translate(-3px,-2.25px)}63%{transform:translate(13.5px,.75px)}81%{transform:translate(3px,3.75px)}}
+@keyframes ak-fall{0%{opacity:0;transform:translate(0,0) rotate(-20deg)}18%,62%{opacity:.65}100%{opacity:0;transform:translate3d(var(--drift,-22px),260px,0) rotate(35deg)}}
+@keyframes ak-rise{0%{opacity:0;transform:translate(0,0)}15%{opacity:.9}70%{opacity:.6}100%{opacity:0;transform:translate3d(var(--drift,18px),-220px,0)}}
+
+/* ---------- 窄屏与减少动态 ---------- */
+@media(max-width:640px){
+  html[data-ark][data-theme] .page-heading::before{font-size:38px;top:-2px}
+  html[data-ark][data-theme] .page-heading{padding-top:36px}
+}
+@media(prefers-reduced-motion:reduce){
+  .ark-decor .ark-dust,.ark-decor .ak-ash{display:none!important}
+  .ark-transit{display:none!important}
+  .ark-deck-grid,.ark-home-grid{transform:none}
+}

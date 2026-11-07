@@ -1,11 +1,11 @@
 {
   "id": "speech-recognition",
   "name": "语音识别 API",
-  "version": "1.2.0",
+  "version": "1.5.0",
   "apiVersion": 2,
   "host": "wechatagent",
   "author": "WeChatAgent",
-  "description": "将当前聊天收到的微信语音上传至自己配置的识别接口，转写后交给原聊天模型。未配置接口时不上传音频。",
+  "description": "按公共协议连接语音服务：填写服务地址、密钥和模型 ID，无需逐个适配模型。支持文件转写、Chat 音频及已有自定义请求。",
   "permissions": [
     "audio_read"
   ],
@@ -43,8 +43,8 @@
   "configSchema": {
     "apiProtocol": {
       "type": "string",
-      "title": "API 协议",
-      "description": "按协议处理服务地址、鉴权和请求；自定义请求保留高级模板。",
+      "title": "API 协议（通常保留 auto）",
+      "description": "auto 根据地址识别：基础地址默认文件转写，/chat/completions 使用 Chat 音频。也可按平台文档明确选协议；模型名不参与判断，旧自定义请求保留。",
       "enum": [
         "auto",
         "openai-transcriptions",
@@ -56,13 +56,14 @@
     },
     "endpoint": {
       "type": "string",
-      "title": "API 服务地址",
-      "description": "标准协议可填写基础地址（含所需版本路径）或完整识别地址，保留网关路径前缀；自定义请求填写完整 POST 地址。",
+      "title": "服务地址",
+      "description": "粘贴平台的 API 基础地址（通常含 /v1）或完整 /audio/transcriptions、/chat/completions 地址。保留网关前缀，不自动补 /v1。",
       "maxLength": 2048
     },
     "apiKey": {
       "type": "string",
-      "title": "API Key",
+      "title": "API 密钥",
+      "description": "仅粘贴原始 Key，不带 Bearer、引号或 API_KEY=；无需密钥的本机服务可留空。",
       "secret": true,
       "maxLength": 4096
     },
@@ -93,8 +94,8 @@
     },
     "model": {
       "type": "string",
-      "title": "识别模型 ID",
-      "description": "可从 API 返回的模型列表选择；此处不能填写网址。",
+      "title": "识别模型",
+      "description": "从模型列表选择，或原样粘贴平台提供的模型 ID / 别名。无需在插件登记模型；请用内置短句确认它支持所选音频协议。",
       "maxLength": 200
     },
     "language": {
@@ -129,7 +130,7 @@
     },
     "extraFieldsJson": {
       "type": "string",
-      "title": "multipart 额外字段（JSON 对象）",
+      "title": "额外请求参数（JSON 对象，通常不用改）",
       "maxLength": 16000
     },
     "jsonTemplate": {
@@ -177,7 +178,7 @@
     "modelsEndpoint": {
       "type": "string",
       "title": "模型列表 API 地址（可留空）",
-      "description": "留空时在识别接口同一服务下尝试常见 models 路径；特殊服务可填写完整 GET 地址。",
+      "description": "留空时读取同一基础地址下的 /models，保留网关前缀和查询参数。读取失败仍可手填模型；特殊接口可填完整 GET 地址。",
       "maxLength": 2048
     },
     "modelsResponsePath": {

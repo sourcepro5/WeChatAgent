@@ -23,7 +23,7 @@ export class VoiceIngress {
       try{
         let prepared=message;
         if(message.voice){
-          let generation='';try{generation=this.generationFor();}catch{}
+          let generation='';try{generation=this.generationFor(message);}catch{}
           let result;
           const allowed=await this.canRecognize(message);
           if(this.closed||controller.signal.aborted)return;
@@ -39,7 +39,8 @@ export class VoiceIngress {
           if(!await this.canRecognize(message))result={ok:false,code:'VOICE_INPUT_UNAVAILABLE'};
           const success=result?.ok===true&&typeof result.text==='string'&&!!result.text.trim()&&result.text.length<=4000;
           const code=/^VOICE_[A-Z0-9_]{3,80}$/.test(result?.code??'')?result.code:'VOICE_INPUT_FAILED';
-          try{await this.onResult(message,{ok:success,code,stage:success?'complete':result?.stage??(/^VOICE_(API|MODEL)_/.test(code)?'api':/^VOICE_DECODE/.test(code)?'audio':'host')},generation);}catch{this.log('[Voice] diagnostic_write_failed');}
+          const plugin=/^[a-z][a-z0-9-]{0,39}$/.test(result?.plugin??'')?{plugin:result.plugin}:{};
+          try{await this.onResult(message,{ok:success,code,stage:success?'complete':result?.stage??(/^VOICE_(API|MODEL)_/.test(code)?'api':/^VOICE_DECODE/.test(code)?'audio':'host'),...plugin},generation);}catch{this.log('[Voice] diagnostic_write_failed');}
           prepared={...message,message_type:'text',text:success?'[语音转写，可能存在识别误差] '+result.text.trim():'[语音消息已收到，但语音未能识别，错误代码：'+code+'。这是转写失败，本轮未提供语音内容；不要猜测或声称没有收到消息，可以请对方改发文字，并提示检查语音识别插件配置。]'};
           this.log('[Voice] '+key+' '+(success?'transcribed':/^VOICE_[A-Z0-9_]+$/.test(result?.code??'')?result.code:'VOICE_INPUT_FAILED'));
         }

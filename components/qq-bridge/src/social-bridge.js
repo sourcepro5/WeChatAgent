@@ -1,4 +1,4 @@
-import {pluginEnabled,configuration as pluginConfiguration} from '../../../packages/plugin-api/catalog.mjs';
+import {featurePlugins} from '../../../packages/plugin-api/catalog.mjs';
 import {writeVoiceAttempt} from '../../../packages/plugin-api/voice-status.mjs';
 import {VoiceIngress} from './core/voice-ingress.js';
 import {replyMessageLimit} from '../../../packages/dsh-social-bridge-plugin/reply-layout-policy.mjs';
@@ -76,7 +76,7 @@ const engine = new SocialEngine({ buffer,connection, roleFor: key => personaFor(
   searchFor:searchStateFor,
   searchPolicyFor:message=>searchPolicyFor(buildConversationKey(message.platform,message.kind,message.conversation_id)),
   stickerChoicesFor: message=>adapter.stickerChoices({kind:message.kind,target:message.conversation_id,query:message.text}),
-  notebookEnabledFor:key=>pluginEnabled(historyRoot,'fish-notebook',key),
+  notebookEnabledFor:key=>featurePlugins(historyRoot,'diary-question-v1',key).length>0,
   maxTextPartsFor:()=>replyMessageLimit(JSON.parse(fs.readFileSync(path.join(historyRoot,'config/wechatagent.json'),'utf8').replace(/^\uFEFF/,'' )).wechat),
   stickerPolicyFor: message=>stickerPolicy(config.sticker_policy_file?JSON.parse(fs.readFileSync(config.sticker_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat,buildConversationKey(message.platform,message.kind,message.conversation_id)),
   stickerLabelsFor: (message,ids)=>adapter.stickerLabels({kind:message.kind,target:message.conversation_id,ids}),
@@ -104,11 +104,14 @@ const contextMaintenance = new ContextMaintenance({ buffer, social: engine,
   proactivePending: key => !!proactive.state.chats[key]?.job,
   isReady: () => connection.ready && adapter.stats.connected && !!adapter.selfId, log });
 
+const voicePluginsFor=message=>featurePlugins(historyRoot,'voice-input-v1',buildConversationKey(message.platform,message.kind,message.conversation_id));
 const voiceIngress=new VoiceIngress({
-  generationFor:()=>pluginConfiguration(historyRoot).config.plugins['speech-recognition']?.generation??'',
-  onResult:(_message,result,generation)=>writeVoiceAttempt(historyRoot,result,generation),
+  // Settings generations in effect when the voice arrived. The status goes to the
+  // plugin DSH reports as the handler, else to every candidate (e.g. a conflict).
+  generationFor:voicePluginsFor,
+  onResult:(_message,result,plugins)=>{for(const item of plugins)if(!result.plugin||result.plugin===item.id)writeVoiceAttempt(historyRoot,item.id,result,item.generation);},
   recognize:(message,options)=>plugin.recognizeVoice(buildConversationKey(message.platform,message.kind,message.conversation_id),message.voice,verifiedAssistantSender(message),options),
-  canRecognize:async message=>{const key=buildConversationKey(message.platform,message.kind,message.conversation_id);return activeReaderAccount(historyRoot).id===historyAccount.id&&pluginEnabled(historyRoot,'speech-recognition',key)&&await connection.check({force:true})&&!connection.skips(message)&&(engine.workModeFor(key)!=='assistant'||engine.assistantAllowed(key,message));},
+  canRecognize:async message=>{const key=buildConversationKey(message.platform,message.kind,message.conversation_id);return activeReaderAccount(historyRoot).id===historyAccount.id&&voicePluginsFor(message).length>0&&await connection.check({force:true})&&!connection.skips(message)&&(engine.workModeFor(key)!=='assistant'||engine.assistantAllowed(key,message));},
   deliver:routeIncoming,log,
 });
 adapter.onMessage(message=>{void voiceIngress.push(message).catch(()=>log('[Voice] inbound_failed'));});

@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <winternl.h>
+#include <bcrypt.h>
 #include <atomic>
 #include <cstring>
 #include <cwctype>
@@ -76,11 +77,15 @@ bool ProfileMatches(){
     const BYTE entry[]={0x55,0x41,0x56,0x56,0x57,0x53,0x48,0x81,0xec,0xe0,1,0,0};
     if(memcmp(reinterpret_cast<void*>(base+SendRva),entry,sizeof(entry)))return false;
     if(*reinterpret_cast<uintptr_t*>(base+SenderTable+16)!=base+SendRva)return false;
-    const uintptr_t code[]={SendRva,TextCtorRva,ImageCtorRva,FactoryRva,AllocateRva,FreeRva};
+    const uintptr_t code[]={SendRva,TextCtorRva,ImageCtorRva,StickerFactoryRva,FactoryRva,AllocateRva,FreeRva};
     for(auto rva:code){MEMORY_BASIC_INFORMATION m{};
         if(!VirtualQuery(reinterpret_cast<void*>(base+rva),&m,sizeof(m))||m.State!=MEM_COMMIT||
           !(m.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)))return false;
     }
+    const BYTE stickerEntry[]={0x55,0x56,0x57,0x48,0x83,0xec,0x30};
+    if(memcmp(reinterpret_cast<void*>(base+StickerFactoryRva),stickerEntry,sizeof(stickerEntry)))return false;
+    if(*reinterpret_cast<uintptr_t*>(base+StickerMessageTable+8)!=base+0x78db40||
+       *reinterpret_cast<uintptr_t*>(base+StickerMessageTable+16)!=base+0x78db50)return false;
     return true;
 }
 // Account metadata only, obtained from handles already open in this WeChat process.
@@ -153,6 +158,27 @@ std::filesystem::path CheckedImage(const std::string& value,const std::filesyste
     if(!png&&!jpeg&&!webp)throw std::runtime_error("only PNG, JPEG and WebP are supported");
     return file;
 }
+std::filesystem::path CheckedSticker(const std::string& value,const json& fields,const std::filesystem::path& root){
+    if(root.empty()||!root.is_absolute()||value.empty()||value.size()>32768||value.find('\0')!=std::string::npos)throw std::runtime_error("invalid sticker path/root");
+    const auto candidate=std::filesystem::u8path(value);if(!candidate.is_absolute())throw std::runtime_error("absolute sticker path required");
+    const auto file=std::filesystem::weakly_canonical(candidate),relative=file.lexically_relative(std::filesystem::weakly_canonical(root));
+    if(relative.empty()||relative.is_absolute()||*relative.begin()==L".."||!std::filesystem::is_regular_file(file)||file.extension()!=L".gif")throw std::runtime_error("sticker outside configured outgoing directory");
+    const auto size=std::filesystem::file_size(file);const auto md5=fields.value("md5","");
+    if(!size||size>8*1024*1024||!std::regex_match(md5,std::regex("^[a-f0-9]{32}$"))||!fields.contains("len")||!fields["len"].is_number_integer()||fields["len"].get<uint64_t>()!=size)throw std::runtime_error("invalid sticker size/digest");
+    std::vector<unsigned char> bytes(static_cast<size_t>(size));std::ifstream input(file,std::ios::binary);
+    if(!input.read(reinterpret_cast<char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()))||bytes.size()<6||
+       (memcmp(bytes.data(),"GIF87a",6)&&memcmp(bytes.data(),"GIF89a",6)))throw std::runtime_error("GIF bytes required");
+    BCRYPT_ALG_HANDLE algorithm=nullptr;BCRYPT_HASH_HANDLE hash=nullptr;std::vector<unsigned char> object;unsigned char digest[16]{};DWORD objectSize=0,got=0;bool ok=false;
+    if(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_MD5_ALGORITHM,nullptr,0)>=0&&
+       BCryptGetProperty(algorithm,BCRYPT_OBJECT_LENGTH,reinterpret_cast<PUCHAR>(&objectSize),sizeof(objectSize),&got,0)>=0){
+        object.resize(objectSize);
+        if(BCryptCreateHash(algorithm,&hash,object.data(),objectSize,nullptr,0,0)>=0&&
+           BCryptHashData(hash,bytes.data(),static_cast<ULONG>(bytes.size()),0)>=0&&BCryptFinishHash(hash,digest,sizeof(digest),0)>=0)ok=true;
+    }
+    if(hash)BCryptDestroyHash(hash);if(algorithm)BCryptCloseAlgorithmProvider(algorithm,0);
+    std::string actual;const char* hex="0123456789abcdef";for(auto byte:digest){actual+=hex[byte>>4];actual+=hex[byte&15];}
+    if(!ok||actual!=md5)throw std::runtime_error("sticker integrity mismatch");return file;
+}
 bool ValidTarget(const std::string& value){return !value.empty()&&value.size()<=256&&value.find('\0')==std::string::npos;}
 std::string MentionList(const json& values){
     if(!values.is_array()||values.empty()||values.size()>8)throw std::runtime_error("expected 1-8 member IDs");
@@ -194,6 +220,21 @@ struct Prepared{
             // Preserve the constructor's native string ownership, including long ID lists.
             if(!atList.empty())SetString(static_cast<BYTE*>(message)+0x778,atList);
         }
+        BuildSender(message);
+    }
+    void BuildSticker(const std::string& target,const std::string& file,uint64_t bytes){
+        struct SharedMessage{uintptr_t body=0,control=0;};SharedMessage shared;
+        using Create=SharedMessage*(__fastcall*)(SharedMessage*);phase=1;
+        reinterpret_cast<Create>(base+StickerFactoryRva)(&shared);owner=reinterpret_cast<void*>(shared.control);
+        if(!owner||shared.body!=shared.control+16||Word(owner,0)!=base+StickerOwnerTable||
+           *reinterpret_cast<uintptr_t*>(shared.body)!=base+StickerMessageTable)throw std::runtime_error("native sticker class mismatch");
+        auto* message=reinterpret_cast<BYTE*>(shared.body);phase=2;
+        SetString(message+0xb0,target);const auto path=std::filesystem::u8path(file);
+        SetWideString(message+0x120,path.wstring());SetString(message+0x1a8,path.filename().u8string());
+        Word(message,0x118)=(uint64_t(8)<<32)|49;Word(message,0x1c8)=bytes;
+        BuildSender(message);
+    }
+    void BuildSender(void* message){
         void* vector=New(0x20);Word(vector,0)=reinterpret_cast<uintptr_t>(message);Word(vector,8)=reinterpret_cast<uintptr_t>(owner);
         sender=New(0x28);Word(sender,0)=base+SenderTable;Word(sender,8)=reinterpret_cast<uintptr_t>(vector);
         Word(sender,16)=reinterpret_cast<uintptr_t>(vector)+16;Word(sender,24)=reinterpret_cast<uintptr_t>(vector)+16;Word(sender,32)=1;
@@ -212,6 +253,7 @@ struct Prepared{
 void Probe(){
     {Prepared p;p.Build("filehelper","native construction probe");}
     {Prepared p;p.Build("filehelper","native image construction probe.png",true,1);}
+    {Prepared p;p.BuildSticker("filehelper","native sticker construction probe.gif",1);}
     {Prepared p;p.Build("native_probe@chatroom","native mention construction",false,0,"wxid_native_probe");}
 }
 void Submit(const std::string& target,const std::string& text){Prepared p;p.Build(target,text);phase=5;
@@ -230,7 +272,17 @@ void MentionCatching(const std::string& target,const std::string& text,const std
 }catch(const std::exception& e){nativeCppError=e.what();}}
 DWORD GuardMention(const std::string* target,const std::string* text,const std::string* ids){__try{MentionCatching(*target,*text,*ids);return 0;}__except(EXCEPTION_EXECUTE_HANDLER){return GetExceptionCode();}}
 
+void StickerCatching(const std::string& target,const std::string& file,uint64_t bytes){nativeCppError.clear();try{
+    Prepared p;p.BuildSticker(target,file,bytes);phase=5;reinterpret_cast<Send>(base+SendRva)(p.sender,p.params);phase=6;
+}catch(const std::exception& e){nativeCppError=e.what();}}
+DWORD GuardSticker(const std::string* target,const std::string* file,uint64_t bytes){__try{StickerCatching(*target,*file,bytes);return 0;}__except(EXCEPTION_EXECUTE_HANDLER){return GetExceptionCode();}}
+
 DWORD WINAPI Run(void*){
+    // Resolve module paths on our reserved-stack worker, never in DllMain.
+    std::vector<wchar_t> modulePath(32768);
+    const DWORD pathLength=GetModuleFileNameW(reinterpret_cast<HMODULE>(OwnModule),modulePath.data(),static_cast<DWORD>(modulePath.size()));
+    if(!pathLength||pathLength>=modulePath.size())return 7;
+    ConfigFile=std::filesystem::path(std::wstring(modulePath.data(),pathLength)).parent_path()/L"wechatagent-hook.json";
     base=reinterpret_cast<uintptr_t>(GetModuleHandleW(L"Weixin.dll"));
     if(!ProfileMatches()){Event("profile-mismatch");return 1;}
     if(WaitForInputIdle(GetCurrentProcess(),15000)!=WAIT_OBJECT_0){Event("gui-startup-not-idle");return 6;}
@@ -253,10 +305,10 @@ DWORD WINAPI Run(void*){
     };
     server.Get("/WeChatAgent/health",[&](const httplib::Request& req,httplib::Response& res){
         if(!authorized(req,res))return;
-        res.set_content(json({{"backend","wechat-hook"},{"integration","WeChatAgent-1"},{"profile","4.2.0.12-experimental-v1"},{"startupState",probeReady.load()&&!faulted.load()?"ready":"failed"},{"version",Version()},
+        res.set_content(json({{"backend","wechat-hook"},{"integration","WeChatAgent-1"},{"profile","4.2.0.12-stickers-v2"},{"startupState",probeReady.load()&&!faulted.load()?"ready":"failed"},{"version",Version()},
           {"pid",GetCurrentProcessId()},{"databaseAccounts",Accounts()},{"nativeTextSend",probeReady.load()&&!faulted.load()},
           {"nativeImageSend",probeReady.load()&&!faulted.load()},{"nativeMentionSend",probeReady.load()&&!faulted.load()},
-          {"nativeQuoteSend",false},{"nativeStickerSend",false},{"phase",phase.load()},{"faulted",faulted.load()},
+          {"nativeQuoteSend",false},{"nativeStickerSend",probeReady.load()&&!faulted.load()},{"phase",phase.load()},{"faulted",faulted.load()},
           {"diagnostics",{{"messageTableRva",actualMessageTable.load()},{"receiverLength",receiverLength.load()},
             {"receiverCapacity",receiverCapacity.load()},{"contentLength",contentLength.load()},{"contentCapacity",contentCapacity.load()}}}}).dump(),"application/json");
     });
@@ -302,6 +354,19 @@ DWORD WINAPI Run(void*){
         }
         Event("native-image-send-accepted");res.set_content("{\"ret\":0,\"retmsg\":\"accepted\"}","application/json");
     });
+    server.Post("/SendStickerMsg",[&](const httplib::Request& req,httplib::Response& res){
+        if(!authorized(req,res))return;std::lock_guard<std::mutex> lock(sendMutex);if(!readyFor(req,res))return;
+        std::string target,file;uint64_t bytes=0;
+        try{
+            const auto body=json::parse(req.body);target=body.value("wxidorgid","");if(!ValidTarget(target))throw std::runtime_error("invalid target");
+            const auto sticker=CheckedSticker(body.value("path",""),body.at("sticker"),std::filesystem::u8path(config.value("stickerRoot","")));file=sticker.u8string();bytes=std::filesystem::file_size(sticker);
+        }catch(const std::exception& e){res.status=400;res.set_content(json({{"ret",1},{"error",e.what()}}).dump(),"application/json");return;}
+        const DWORD code=GuardSticker(&target,&file,bytes);
+        if(code||!nativeCppError.empty()){
+            faulted=true;Event("native-sticker-send-uncertain");res.status=503;res.set_content("{\"ret\":1,\"error\":\"native sticker submission uncertain; do not retry\"}","application/json");return;
+        }
+        Event("native-sticker-send-accepted");res.set_content("{\"ret\":0,\"retmsg\":\"accepted\"}","application/json");
+    });
     server.Post("/SendTextAtMsg",[&](const httplib::Request& req,httplib::Response& res){
         if(!authorized(req,res))return;std::lock_guard<std::mutex> lock(sendMutex);if(!readyFor(req,res))return;
         std::string target,text,ids;
@@ -325,8 +390,8 @@ DWORD WINAPI Run(void*){
 }
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,void*){
     if(reason==DLL_PROCESS_ATTACH){
-        wchar_t path[32768]{};GetModuleFileNameW(instance,path,32768);
-        ConfigFile=std::filesystem::path(path).parent_path()/L"wechatagent-hook.json";
-        OwnModule=reinterpret_cast<uintptr_t>(instance);DisableThreadLibraryCalls(instance);HANDLE thread=CreateThread(nullptr,2*1024*1024,Run,nullptr,STACK_SIZE_PARAM_IS_A_RESERVATION,nullptr);if(thread)CloseHandle(thread);
+        // /MT requires thread notifications. Keep every notification frame tiny.
+        OwnModule=reinterpret_cast<uintptr_t>(instance);
+        HANDLE thread=CreateThread(nullptr,2*1024*1024,Run,nullptr,STACK_SIZE_PARAM_IS_A_RESERVATION,nullptr);if(thread)CloseHandle(thread);
     }return TRUE;
 }
