@@ -34,7 +34,7 @@ $commands = @(
     ('call "'+$vcvars+'" >nul'),
     'if errorlevel 1 exit /b 1',
     ('cd /d "'+$build+'"'),
-    ('cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 /LD /I"'+(Join-Path $HeadersRoot 'include')+'" /I"'+(Join-Path $HeadersRoot '3rdparty\httplib')+'" "'+(Join-Path $source 'text_4_2_0_12.cpp')+'" /link version.lib ws2_32.lib user32.lib bcrypt.lib /out:"'+(Join-Path $output 'wechatagent-text-4.2.0.12.dll')+'"'),
+    ('cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 /LD /I"'+(Join-Path $HeadersRoot 'include')+'" /I"'+(Join-Path $HeadersRoot '3rdparty\httplib')+'" /I"'+(Join-Path $HeadersRoot 'minhook\include')+'" "'+(Join-Path $source 'text_4_2_0_12.cpp')+'" "'+(Join-Path $source 'image_quality.cpp')+'" "'+(Join-Path $HeadersRoot 'minhook\src\buffer.c')+'" "'+(Join-Path $HeadersRoot 'minhook\src\hook.c')+'" "'+(Join-Path $HeadersRoot 'minhook\src\trampoline.c')+'" "'+(Join-Path $HeadersRoot 'minhook\src\hde\hde64.c')+'" /link version.lib ws2_32.lib user32.lib bcrypt.lib /out:"'+(Join-Path $output 'wechatagent-text-4.2.0.12.dll')+'"'),
     'if errorlevel 1 exit /b 1',
     ('cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 "'+(Join-Path $source 'text_loader_4_2_0_12.cpp')+'" /link /out:"'+(Join-Path $output 'wechatagent-text-loader.exe')+'"'),
     'exit /b %errorlevel%'
@@ -44,7 +44,7 @@ $commandFile = Join-Path $output 'build.cmd'
 & $env:ComSpec /d /c ('"'+$commandFile+'"')
 if ($LASTEXITCODE -ne 0) { throw 'Current-version native text build failed.' }
 $manifest = @{
-    experimental=$true; productionEnabled=$false; runtimeVerified=$false; targetVersion='4.2.0.12'; profile='4.2.0.12-stickers-v2'; integration='WeChatAgent-1';
+    experimental=$true; productionEnabled=$false; runtimeVerified=$false; targetVersion='4.2.0.12'; profile='4.2.0.12-stickers-v2'; integration='WeChatAgent-1'; imageQuality='per-message';
     nativeTextSend=$true; nativeImageSend=$true; nativeMentionSend=$true; nativeQuoteSend=$false; nativeStickerSend=$true;
     sha256=(Get-FileHash -LiteralPath (Join-Path $output 'wechatagent-text-4.2.0.12.dll') -Algorithm SHA256).Hash.ToLowerInvariant();
     loaderSha256=(Get-FileHash -LiteralPath (Join-Path $output 'wechatagent-text-loader.exe') -Algorithm SHA256).Hash.ToLowerInvariant()

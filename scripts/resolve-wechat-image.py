@@ -82,7 +82,7 @@ def resolve(descriptor):
     # Resource IDs bind files to the exact server message. Local IDs alone are
     # deliberately insufficient because they collide between shards/chats.
     ids = ids[:4096]
-    candidates = media.local_image_candidates(reader.account, talker, ids)
+    candidates = media.local_image_candidates(reader.account, talker, ids, descriptor.get('localId'), descriptor.get('createTime'))
     fingerprint = media.image_source_fingerprint(reader.account, candidates)
     wxgf_deadline = time.monotonic() + 5
     for thumbnail in (False, True):
@@ -91,7 +91,7 @@ def resolve(descriptor):
             if is_thumbnail != thumbnail or size > media.MAX_IMAGE_SOURCE_SIZE:
                 continue
             for xor, aes in keys:
-                decoded = media.decode_wechat_v2(str(file), xor, aes, max_size=media.MAX_IMAGE_SOURCE_SIZE)
+                decoded = media.read_plain_image(str(file)) or media.decode_wechat_v2(str(file), xor, aes, max_size=media.MAX_IMAGE_SOURCE_SIZE)
                 if decoded:
                     try:
                         raw = decoded[0]

@@ -116,11 +116,52 @@ def decode_wechat_v2(filepath, xor_key, aes_key, max_size=MAX_EMBED_SIZE):
         return None
 
 
-def local_image_candidates(account, talker, ids):
+def read_plain_image(filepath, max_size=MAX_IMAGE_SOURCE_SIZE):
+    """Read an already-decrypted image file (WeChat ImageTemp temp copies are plain JPEG)."""
+    try:
+        with open(filepath, 'rb') as stream:
+            head = stream.read(16)
+            if not (head.startswith(b'\xff\xd8') or head.startswith(b'\x89PNG') or head.startswith(b'GIF8') or head[:4].lower() == b'wxgf'):
+                return None
+            stream.seek(0)
+            data = stream.read(max_size + 1)
+        if len(data) > max_size:
+            return None
+        mime = detect_mime_from_bytes(data[:16]) or ('image/x-wxgf' if data[:4].lower() == b'wxgf' else None)
+        return (data, mime) if mime else None
+    except OSError:
+        return None
+
+
+def local_image_temp_candidates(account, talker, local_id, create_time):
+    """WeChat writes the freshly downloaded original into cache/<month>/Message/<md5(talker)>/ImageTemp."""
+    result = []
+    try:
+        local_id = int(local_id)
+        create_time = int(create_time)
+    except (TypeError, ValueError):
+        return result
+    if local_id <= 0 or create_time <= 0:
+        return result
+    import datetime
+    month = datetime.datetime.fromtimestamp(create_time).strftime('%Y-%m')
+    folder = Path(account) / 'cache' / month / 'Message' / hashlib.md5(talker.encode()).hexdigest() / 'ImageTemp'
+    for suffix, thumb in (('_mid_temp', False), ('_thumb_temp', True)):
+        file = folder / f'{local_id}_{create_time}{suffix}'
+        try:
+            info = file.stat()
+        except OSError:
+            continue
+        if 0 < info.st_size <= MAX_IMAGE_SOURCE_SIZE:
+            result.append((file, thumb, info.st_size, info.st_mtime_ns))
+    return result
+
+
+def local_image_candidates(account, talker, ids, local_id=None, create_time=None):
     """Find only message-bound files in this conversation, full copies first."""
     wanted = {value.lower() for value in ids if isinstance(value, str) and re.fullmatch(r'[a-fA-F0-9]{32}', value)}
     attach = Path(account) / 'msg' / 'attach' / hashlib.md5(talker.encode()).hexdigest()
-    result = []
+    result = list(local_image_temp_candidates(account, talker, local_id, create_time))
     if not wanted or not attach.is_dir():
         return result
     # Enumerate names once per bucket, rather than issuing thousands of stat
