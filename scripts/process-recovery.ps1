@@ -40,7 +40,13 @@ public static class RecoveryProcess {
     if($Mode -eq 'Inspect') {
         $owners=@{}
         foreach($port in @($request.ports)) {
-            foreach($listener in @(Get-NetTCPConnection -LocalPort ([int]$port) -ErrorAction SilentlyContinue | Where-Object {[string]$_.State -in @('Listen','Bound') -and $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::')})) {
+            $listeners=@(Get-NetTCPConnection -LocalPort ([int]$port) -ErrorAction SilentlyContinue | Where-Object {
+                $_.LocalAddress -in @('127.0.0.1','0.0.0.0','::') -and (
+                    [string]$_.State -in @('Listen','Bound') -or
+                    ([string]::IsNullOrEmpty([string]$_.State) -and [int]$_.RemotePort -eq 0)
+                )
+            })
+            foreach($listener in $listeners) {
                 $key=[string]$listener.OwningProcess
                 if(-not $owners.ContainsKey($key)){$owners[$key]=@()};$owners[$key]+=[int]$port
             }
