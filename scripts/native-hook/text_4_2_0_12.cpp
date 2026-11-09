@@ -17,6 +17,7 @@
 #include "text_profile_4_2_0_12.h"
 #include "httplib.h"
 #include "json.hpp"
+#include "image_quality.h"
 
 using json=nlohmann::json;
 namespace {
@@ -312,6 +313,22 @@ DWORD WINAPI Run(void*){
           {"diagnostics",{{"messageTableRva",actualMessageTable.load()},{"receiverLength",receiverLength.load()},
             {"receiverCapacity",receiverCapacity.load()},{"contentLength",contentLength.load()},{"contentCapacity",contentCapacity.load()}}}}).dump(),"application/json");
     });
+    server.Post("/WeChatAgent/ImageQuality",[&](const httplib::Request& req,httplib::Response& res){
+        if(!authorized(req,res))return;
+        try{
+            const auto body=json::parse(req.body);
+            const int mode=body.value("mode",-1);
+            if(mode<1||mode>3){res.status=400;res.set_content("{\"error\":\"mode must be 1..3\"}","application/json");return;}
+            if(body.contains("localId")){
+                const long localId=body.value("localId",-1L);
+                if(localId<0){res.status=400;res.set_content("{\"error\":\"localId must be >=0\"}","application/json");return;}
+                ImageQualitySetLocal(localId,mode);
+            } else {
+                ImageQualitySetMode(mode);
+            }
+            res.set_content(json({{"ok",true},{"mode",ImageQualityMode()},{"hits",ImageQualityHits()},{"mods",ImageQualityMods()}}).dump(),"application/json");
+        }catch(const std::exception& e){res.status=400;res.set_content(json({{"error",e.what()}}).dump(),"application/json");}
+    });
     server.Post("/WeChatAgent/probe",[&](const httplib::Request& req,httplib::Response& res){
         if(!authorized(req,res))return;std::lock_guard<std::mutex> lock(sendMutex);
         if(faulted){res.status=409;res.set_content("{\"error\":\"native fault; no retry\"}","application/json");return;}
@@ -381,6 +398,7 @@ DWORD WINAPI Run(void*){
         }
         Event("native-mention-send-accepted");res.set_content("{\"ret\":0,\"retmsg\":\"accepted\"}","application/json");
     });
+    if(!ImageQualityStart())Event("image-quality-hook-failed");else Event("image-quality-hook-ready");
     const auto url=config.value("baseUrl","");
     std::smatch match;
     const int port=std::regex_match(url,match,std::regex(R"(http://127\.0\.0\.1:([0-9]{1,5}))"))?std::stoi(match[1]):0;
