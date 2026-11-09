@@ -44,7 +44,7 @@ $commandFile = Join-Path $output 'build.cmd'
 & $(if($env:ComSpec){$env:ComSpec}else{"C:\Windows\System32\cmd.exe"}) /d /c ('"'+$commandFile+'"')
 if ($LASTEXITCODE -ne 0) { throw 'Current-version native text build failed.' }
 $manifest = @{
-    experimental=$true; productionEnabled=$false; runtimeVerified=$false; targetVersion='4.2.0.12'; profile='4.2.0.12-stickers-v2'; integration='WeChatAgent-1';
+    experimental=$true; productionEnabled=$false; runtimeVerified=$false; targetVersion='4.2.0.12'; profile='4.2.0.12-stickers-v2'; integration='WeChatAgent-1'; imageQuality='per-message';
     nativeTextSend=$true; nativeImageSend=$true; nativeMentionSend=$true; nativeQuoteSend=$false; nativeStickerSend=$true;
     sha256=(Get-FileHash -LiteralPath (Join-Path $output 'wechatagent-text-4.2.0.12.dll') -Algorithm SHA256).Hash.ToLowerInvariant();
     loaderSha256=(Get-FileHash -LiteralPath (Join-Path $output 'wechatagent-text-loader.exe') -Algorithm SHA256).Hash.ToLowerInvariant()

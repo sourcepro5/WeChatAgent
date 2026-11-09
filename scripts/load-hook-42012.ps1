@@ -39,4 +39,23 @@ $health = Invoke-RestMethod -Uri ($BaseUrl.TrimEnd('/')+'/WeChatAgent/health') -
 if($health.profile -ne $build.profile -or $health.nativeImageSend -ne $true -or $health.nativeMentionSend -ne $true -or $health.nativeStickerSend -ne $true){
     throw 'An older sender is still loaded. Exit/reopen the matching WeChat normally, then load this build; no automatic unload or restart was attempted.'
 }
+$sidecar = Join-Path $PSScriptRoot 'image-quality-agent.py'
+if ($build.imageQuality -eq 'per-message' -and (Test-Path -LiteralPath $sidecar)) {
+    $configPath = Join-Path $root 'config\wechatagent.json'
+    if (Test-Path -LiteralPath $configPath) {
+        $runtime = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $python = [string]$runtime.runtime.python
+        if ($python -ne '') {
+            $pythonExe = if ([IO.Path]::IsPathRooted($python)) { $python } else { (Get-Command $python -ErrorAction SilentlyContinue).Source }
+            if ($pythonExe -and (Test-Path -LiteralPath $pythonExe)) {
+                $running = @(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('python.exe','pythonw.exe') -and $_.CommandLine -match 'image-quality-agent\.py' })
+                if ($running.Count -eq 0) {
+                    $pythonw = Join-Path (Split-Path -Parent $pythonExe) 'pythonw.exe'
+                    $launch = if (Test-Path -LiteralPath $pythonw) { $pythonw } else { $pythonExe }
+                    Start-Process -FilePath $launch -ArgumentList @($sidecar) -WindowStyle Hidden
+                }
+            }
+        }
+    }
+}
 Write-Output 'Current-version native text/image/mention APIs ready; finish login and run hook:check.'
