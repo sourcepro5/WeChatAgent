@@ -27,7 +27,9 @@ node scripts/verify-plugin-release.mjs
 npm run privacy:check
 ```
 
-源码额外包含已校验的 fish-notebook-1.1.1.zip 与 speech-recognition-1.5.0.zip，以及固定版本、保留许可的 SILK 解码最小载荷；不包含完整安装器、vendor 程序及个人数据。安装器、源码包、可选插件、SHA256SUMS.txt 与 VERIFICATION.json 作为 Release 附件上传。上传命令见 [GitHub 发布](GITHUB_PUBLISHING.md)。
+源码额外包含已校验的 fish-notebook-1.1.1.zip 与 speech-recognition-1.5.0.zip，以及固定版本、保留许可的 SILK 解码最小载荷；不包含完整安装器、vendor 程序及个人数据。
+
+维护者创建 GitHub Release 时，先确认提交、版本标签和验证报告对应同一次构建。将安装器、源码包、可选插件、SHA-256 校验清单和验证报告随该版本发布，发布说明使用根目录的 `RELEASE_NOTES.md`。正式发行附件见 [GitHub Releases](https://github.com/sourcepro5/WeChatAgent/releases)。
 
 ## 验证范围
 
