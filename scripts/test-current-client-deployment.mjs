@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import deployment from '../apps/console-desktop/deployment.cjs';
 import {verifyHookBuild} from './hook-build-policy.mjs';
+import {archivePlugin,configuration,pluginCatalog} from '../packages/plugin-api/catalog.mjs';
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 function fixture(t){
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'wechatagent-release-client-'));
@@ -79,6 +80,40 @@ test('a 4.2-only package deploys without any legacy client or legacy sender payl
  for(const old of ['native','native-4.1.15.13','wechat-4.1.10.27','wechat-4.1.15.13'])assert(!fs.existsSync(path.join(installed.root,'state/hook',old)));
  assert(fs.existsSync(path.join(installed.root,'state/hook/native-4.2.0.12/wechatagent-text-4.2.0.12.dll')));
 });
+test('both preinstalled voice plugins are builtin and disabled until configured',async t=>{
+ const f=current42(t),id='speech-recognition',dialogue='speech-synthesis';
+ f.manifest.builtinPlugins=[id,dialogue];
+ const files=Object.fromEntries(f.manifest.builtinPlugins.flatMap(plugin=>['plugin.json','index.mjs'].map(relative=>{
+   const file='optional-extensions/'+plugin+'/'+relative;
+   return [file,fs.readFileSync(file)];
+ })));
+ f.manifest.files.push(...Object.keys(files));
+ f.manifest.sourceHashes=Object.fromEntries(Object.entries(files).map(([file,bytes])=>[file,hash(bytes)]));
+ for(const [file,bytes] of Object.entries(files))f.write('project/'+file,bytes);
+ f.write('project/deployment.json',JSON.stringify(f.manifest));
+ const fresh=await deployment.bootstrapDeployment(f.resources,f.home);
+ const plugins=pluginCatalog(fresh.root).plugins;
+ assert.deepEqual(plugins.map(({id,version,builtin,enabled,permissions,chats})=>({id,version,builtin,enabled,permissions,chats})),
+   [{id,version:'1.6.0',builtin:true,enabled:false,permissions:[],chats:[]},
+    {id:dialogue,version:'1.7.0',builtin:true,enabled:false,permissions:[],chats:[]}]);
+ assert.equal(fs.existsSync(path.join(fresh.root,'config/plugins.json')),false);
+ assert.throws(()=>archivePlugin(fresh.root,id,configuration(fresh.root).revision),/内置/);
+ assert.throws(()=>archivePlugin(fresh.root,dialogue,configuration(fresh.root).revision),/内置/);
+ const priorHome=path.join(f.home,'upgrade'), priorRoot=path.join(priorHome,'workspace'), priorPlugin=path.join(priorRoot,'plugins',id);
+ fs.mkdirSync(priorPlugin,{recursive:true});
+ const oldPackage={...JSON.parse(files['optional-extensions/'+id+'/plugin.json']),version:'1.5.0'};
+ fs.writeFileSync(path.join(priorPlugin,'plugin.json'),JSON.stringify(oldPackage));
+ fs.writeFileSync(path.join(priorPlugin,'index.mjs'),'// existing plugin');
+ fs.mkdirSync(path.join(priorRoot,'config'));
+ const existingSettings={version:1,plugins:{[id]:{enabled:true,permissions:['audio_read'],chats:['wechat:private:123'],settings:{apiKey:'fixture-key'}}}};
+ fs.writeFileSync(path.join(priorRoot,'config/plugins.json'),JSON.stringify(existingSettings));
+ await deployment.bootstrapDeployment(f.resources,priorHome);
+ assert.equal(fs.readFileSync(path.join(priorPlugin,'index.mjs'),'utf8'),'// existing plugin');
+ assert.deepEqual(configuration(priorRoot).config,existingSettings);
+ assert.deepEqual(pluginCatalog(priorRoot).plugins.map(({id,version,builtin,enabled})=>({id,version,builtin,enabled})),
+   [{id,version:'1.5.0',builtin:false,enabled:true},
+    {id:dialogue,version:'1.7.0',builtin:true,enabled:false}]);
+});
 test('4.2 packaging and deployment reject missing runtime acceptance and mixed bundled versions',async t=>{
  const f=current42(t);f.build.acceptance.coldStart=false;f.write('vendor/hook-current/build.json',JSON.stringify(f.build));
  assert.throws(()=>verifyHookBuild(path.join(f.resources,'vendor/hook-current'),'4.2.0.12'),/acceptance/);await assert.rejects(()=>deployment.bootstrapDeployment(f.resources,f.home),/运行验收/);
@@ -93,4 +128,18 @@ test('4.2 cannot ship text-only or unverified animated-sticker payloads',async t
   assert.throws(()=>verifyHookBuild(path.join(f.resources,'vendor/hook-current'),'4.2.0.12'),/profile mismatch|acceptance/);
   await assert.rejects(()=>deployment.bootstrapDeployment(f.resources,f.home),/运行验收/);
  }
+});
+
+test('4.2 packages advertising native voice require voice receipt acceptance',async t=>{
+ const f=current42(t);
+ f.build.nativeVoiceSend=true;
+ f.build.nativeVoiceProtocol='silk-receipt-v1';
+ const nativeDirectory=path.join(f.resources,'vendor/hook-current');
+ f.write('vendor/hook-current/build.json',JSON.stringify(f.build));
+ assert.throws(()=>verifyHookBuild(nativeDirectory,'4.2.0.12'),/voice receipt acceptance/);
+ await assert.rejects(()=>deployment.bootstrapDeployment(f.resources,f.home),/语音组件尚未通过回执验收/);
+ f.build.acceptance.voiceReceipt=true;
+ f.write('vendor/hook-current/build.json',JSON.stringify(f.build));
+ assert.equal(verifyHookBuild(nativeDirectory,'4.2.0.12').nativeVoiceSend,true);
+ await deployment.bootstrapDeployment(f.resources,f.home);
 });

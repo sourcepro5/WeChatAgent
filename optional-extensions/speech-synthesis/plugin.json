@@ -1,0 +1,147 @@
+{
+  "id": "speech-synthesis",
+  "name": "语音对话 API",
+  "version": "1.7.0",
+  "apiVersion": 2,
+  "host": "wechatagent",
+  "author": "WeChatAgent",
+  "description": "按能力配置语音服务：语音合成朗读 DSH 的回复正文，实时语音识别或单条语音识别转写收到的微信语音。每项能力可分别选择第三方语音服务（腾讯云、千问 / 阿里云百炼、OpenAI、硅基流动、ElevenLabs、Azure AI Speech、Google Cloud、智谱、阶跃星辰）或任何兼容的自定义 API，并分别保存凭据。",
+  "permissions": [
+    "audio_read",
+    "audio_synthesize"
+  ],
+  "requiresHostFeatures": [
+    "actions-v1",
+    "voice-input-v1",
+    "voice-output-v1",
+    "voice-dialogue-v1"
+  ],
+  "requiresAccount": true,
+  "settings": {
+    "voiceMode": "separate",
+    "endpoint": "",
+    "apiKey": "",
+    "model": "",
+    "voice": "",
+    "speed": 1,
+    "recognitionModel": "",
+    "recognitionEndpoint": "",
+    "realtimeModel": "",
+    "realtimeEndpoint": "",
+    "realtimeProtocol": "auto",
+    "instructions": "",
+    "timeoutMs": 20000,
+    "services": {},
+    "ttsKey": "",
+    "realtimeAsrKey": "",
+    "fileAsrKey": ""
+  },
+  "configSchema": {
+    "voiceMode": {
+      "type": "string",
+      "title": "语音模式",
+      "enum": [
+        "separate",
+        "realtime",
+        "dsh-realtime"
+      ]
+    },
+    "endpoint": {
+      "type": "string",
+      "title": "服务地址",
+      "maxLength": 2048
+    },
+    "apiKey": {
+      "type": "string",
+      "title": "API 密钥",
+      "secret": true,
+      "maxLength": 4096
+    },
+    "model": {
+      "type": "string",
+      "title": "语音模型",
+      "maxLength": 200
+    },
+    "voice": {
+      "type": "string",
+      "title": "音色",
+      "maxLength": 200
+    },
+    "speed": {
+      "type": "number",
+      "title": "语速（1 为正常）",
+      "minimum": 0.25,
+      "maximum": 4
+    },
+    "recognitionModel": {
+      "type": "string",
+      "title": "识别模型",
+      "maxLength": 200
+    },
+    "recognitionEndpoint": {
+      "type": "string",
+      "title": "独立识别地址（可留空）",
+      "maxLength": 2048
+    },
+    "realtimeModel": {
+      "type": "string",
+      "title": "Realtime 模型",
+      "maxLength": 200
+    },
+    "realtimeEndpoint": {
+      "type": "string",
+      "title": "Realtime WebSocket 地址（可留空）",
+      "maxLength": 2048
+    },
+    "realtimeProtocol": {
+      "type": "string",
+      "title": "实时对话协议",
+      "enum": [
+        "auto",
+        "openai",
+        "openai-beta"
+      ]
+    },
+    "instructions": {
+      "type": "string",
+      "title": "语气指令（可留空）",
+      "maxLength": 4096
+    },
+    "timeoutMs": {
+      "type": "integer",
+      "title": "API 超时（毫秒）",
+      "minimum": 1000,
+      "maximum": 25000
+    },
+    "services": {
+      "type": "object",
+      "title": "语音能力与服务来源",
+      "additionalProperties": true,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2
+        }
+      }
+    },
+    "ttsKey": {
+      "type": "string",
+      "title": "语音合成凭据",
+      "secret": true,
+      "maxLength": 12000
+    },
+    "realtimeAsrKey": {
+      "type": "string",
+      "title": "实时语音识别凭据",
+      "secret": true,
+      "maxLength": 12000
+    },
+    "fileAsrKey": {
+      "type": "string",
+      "title": "单条语音识别凭据",
+      "secret": true,
+      "maxLength": 12000
+    }
+  }
+}

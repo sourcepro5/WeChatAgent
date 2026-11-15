@@ -17,10 +17,17 @@ if(JSON.stringify(builtFiles)!==JSON.stringify(privacy.files.sort()))throw Error
 for(const relative of builtFiles)if(hash(fs.readFileSync(path.join(root,relative)))!==sourceReport.sourceFiles[relative])throw Error('SOURCE_CHANGED_AFTER_PACKAGING: '+relative);
 const stage=path.join(root,'state/installer-stage/project'),unpacked=path.join(root,'release/installer/win-unpacked/resources/project');
 const templateReports=[];
+const builtinPlugins=BUNDLED_PLUGINS.filter(item=>item.builtin===true).map(item=>item.id);
 for(const directory of [stage,unpacked]){
   await assertPluginHost(directory,{compareRoot:root});
   const manifest=JSON.parse(fs.readFileSync(path.join(directory,'deployment.json')));
   if(manifest.version!==version||manifest.packageVersion!==packageVersion)throw Error('INSTALLER_VERSION_MISMATCH');
+  if(JSON.stringify(manifest.builtinPlugins??[])!==JSON.stringify(builtinPlugins))throw Error('INSTALLER_BUILTIN_PLUGINS_MISMATCH');
+  if(manifest.foregroundInputRuntime!==true)throw Error('INSTALLER_FOREGROUND_RUNTIME_MISSING');
+  const input=spawnSync(path.join(directory,'../runtime/python/python.exe'),['-B','-c','import psutil,win32api,win32clipboard,win32gui,win32process'],{windowsHide:true,encoding:'utf8',timeout:30000});
+  if(input.status!==0)throw Error('INSTALLER_FOREGROUND_IMPORT_FAILED: '+(input.stderr||''));
+  const worker=spawnSync(path.join(directory,'../runtime/python/python.exe'),['-B',path.join(directory,'scripts/input-worker.py'),'--help'],{windowsHide:true,encoding:'utf8',timeout:30000});
+  if(worker.status!==0||!worker.stdout.includes('--workspace'))throw Error('INSTALLER_FOREGROUND_WORKER_FAILED: '+(worker.stderr||''));
   for(const relative of ['package.json','../app/package.json']){
     const item=JSON.parse(fs.readFileSync(path.join(directory,relative),'utf8'));
     if(item.version!==packageVersion||item.releaseVersion!==version)throw Error('INSTALLER_PACKAGE_VERSION_MISMATCH');
@@ -50,7 +57,7 @@ for(const directory of [path.join(root,'state/installer-stage/vendor'),path.join
     if(JSON.stringify(files)!==JSON.stringify(['build.json','wechatagent-text-'+bundledWechatVersion+'.dll','wechatagent-text-loader.exe'].sort()))throw Error('INSTALLER_UNEXPECTED_NATIVE_PAYLOAD');
     for(const file of ['load-hook-42012.ps1','build-hook-42012.ps1'])if(bundledWechatVersion==='4.2.0.12'&&!fs.existsSync(path.join(stage,'scripts',file)))throw Error('INSTALLER_4_2_LOADER_MISSING');
   }
-  vendorReports.push({version:bundledWechatVersion,clientSha256:hash(fs.readFileSync(path.join(directory,'wechat/Weixin.exe'))),coreSha256:hash(fs.readFileSync(path.join(directory,'wechat',bundledWechatVersion,'Weixin.dll'))),nativeProfile:current?.profile??null,nativeSha256:current?.sha256??null,loaderSha256:current?.loaderSha256??null});
+  vendorReports.push({version:bundledWechatVersion,clientSha256:hash(fs.readFileSync(path.join(directory,'wechat/Weixin.exe'))),coreSha256:hash(fs.readFileSync(path.join(directory,'wechat',bundledWechatVersion,'Weixin.dll'))),nativeProfile:current?.profile??null,nativeSha256:current?.sha256??null,loaderSha256:current?.loaderSha256??null,nativeVoiceSend:current?.nativeVoiceSend===true});
 }
 if(JSON.stringify(vendorReports[0])!==JSON.stringify(vendorReports[1]))throw Error('INSTALLER_VENDOR_RESOURCES_DIVERGED');
 const installerRelative='release/installer/WeChatAgent-Setup-'+version+'-x64.exe',installer=fs.readFileSync(path.join(root,installerRelative));
@@ -62,11 +69,16 @@ const assetRecords=assets.map(relative=>{const data=fs.readFileSync(path.join(ro
 if(assetRecords.find(item=>item.path===sourceReport.asset.path).sha256!==sourceReport.asset.sha256)throw Error('SOURCE_ARCHIVE_CHANGED');
 const liveAcceptance=bundledWechatVersion==='4.2.0.12'?JSON.parse(fs.readFileSync(path.join(root,'release-profile.json'),'utf8')).verification?.wechat42012:null;
 if(bundledWechatVersion==='4.2.0.12'&&(!liveAcceptance?.coldStart||!liveAcceptance?.textReceipt||!liveAcceptance?.imageReceipt||!liveAcceptance?.stickerReceipt||!liveAcceptance?.animatedSticker||liveAcceptance.nativeSha256!==vendorReports[0].nativeSha256))throw Error('RELEASE_RUNTIME_ACCEPTANCE_MISMATCH');
+if(vendorReports[0].nativeVoiceSend&&(liveAcceptance?.voiceReceipt!==true||liveAcceptance.loaderSha256!==vendorReports[0].loaderSha256))throw Error('RELEASE_VOICE_ACCEPTANCE_MISMATCH');
 const report={version,packageVersion,ok:true,...templateReports[0],checkedAt:new Date().toISOString(),pluginHost:sourceAudit.contract,
   sourcePrivacy:{candidateFiles:privacy.candidateFiles,findings:privacy.findings},templateFilesVerified:templateReports,bundledWechat:vendorReports[0],
-  sourceFiles:sourceReport.sourceFiles,assets:assetRecords,regression:JSON.parse(fs.readFileSync(path.join(root,'release-profile.json'),'utf8')).verification?.publicRegression??null,pluginAutoInstalled:false,pluginAutoEnabled:false,
+  sourceFiles:sourceReport.sourceFiles,assets:assetRecords,regression:JSON.parse(fs.readFileSync(path.join(root,'release-profile.json'),'utf8')).verification?.publicRegression??null,builtinPlugins,pluginAutoInstalled:builtinPlugins.length>0,pluginAutoEnabled:false,foregroundInputRuntime:true,
   servicesRestarted:liveAcceptance?.servicesRestarted===true,realWeChatStarted:!!liveAcceptance,actualUserDataUsed:!!liveAcceptance,liveAcceptance,publication:'local-build-only',
-  validationLimits:['Packaged-file, host-contract, source-file-set and artifact-hash verification. WeChat 4.2 cold login, filehelper text/image/native animated GIF receipts and bridge deduplication were tested locally; second-device installation, group mentions, long-running stability and live ASR were not tested.','Automated plugin, console, deployment and synthetic voice tests are recorded in docs/PLUGIN_HOST_AUDIT.md.']};
+  validationLimits:[
+    'Packaged-file, host-contract, source-file-set and artifact-hash verification. Second-device installation, group mentions, long-running stability and live ASR were not tested.',
+    ...(vendorReports[0].nativeVoiceSend?['The bundled Hook was tested after a cold start. Filehelper text, image, animated GIF and native voice receipts were verified against the same DLL.']:[]),
+    'Automated plugin, console, deployment and synthetic voice tests are recorded in docs/PLUGIN_HOST_AUDIT.md.',
+  ]};
 const release=path.join(root,'release/installer');
 fs.writeFileSync(path.join(release,'VERIFICATION.json'),JSON.stringify(report,null,2)+'\n');
 fs.writeFileSync(path.join(release,'VERIFICATION-'+version+'.json'),JSON.stringify(report,null,2)+'\n');

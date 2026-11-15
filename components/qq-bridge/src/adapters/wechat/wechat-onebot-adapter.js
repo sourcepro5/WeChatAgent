@@ -74,6 +74,23 @@ export class WechatOneBotAdapter extends BaseAdapter {
     this.recentOutgoing.set(this.#fingerprint(kind, id, content), Date.now() + this.antiLoopTtlMs);
     this.stats.sends++; return { accepted: true, confirmed: true, response: result, delivered: 'database-confirmed' };
   }
+  // Whether WCA can send a native voice reply to this chat right now.
+  async voiceCapability({kind,target}){
+    if(!['private','group'].includes(kind))throw new TypeError('invalid WeChat kind');
+    const result=await this.server.action('get_voice_capability',{kind,target:String(target)});
+    return {voice:result.data?.voice===true};
+  }
+  // A reply chosen as voice: WCA synthesizes and sends it once per delivery ID;
+  // repeating the call only reports that delivery's status.
+  async sendVoiceText({kind,target,text,deliveryId}){
+    if(!['private','group'].includes(kind)||!/^[a-f0-9]{64}$/.test(deliveryId??''))throw new TypeError('invalid voice reply target');
+    const content=String(text??'').trim();
+    if(!content)throw new TypeError('empty WeChat voice reply');
+    const result=await this.server.action('send_voice_text',{kind,target:String(target),text:content,wechatagent_delivery_id:deliveryId});
+    const data=result.data??{};
+    if(data.status==='confirmed')this.stats.sends++;
+    return {status:data.status,fallback:data.fallback===true,...(typeof data.error==='string'?{error:data.error}:{})};
+  }
   async stickerChoices({kind,target,query}){
     const result=await this.server.action('get_sticker_list',{kind,target:String(target),...(typeof query==='string'&&query.trim()?{query:query.slice(0,500)}:{})});
     return result.data?.enabled?(result.data.stickers??[]):[];

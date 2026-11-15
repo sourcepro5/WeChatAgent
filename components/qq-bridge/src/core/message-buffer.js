@@ -8,7 +8,8 @@ import {validReplyMessageLimit} from '../../../../packages/dsh-social-bridge-plu
 import {verifiedAssistantSender} from '../../../../packages/dsh-social-bridge-plugin/assistant-policy.mjs';
 
 export function replyDeliveryParts(result,deliveryId) {
-  const parts=result.decision==='RESPOND'?(result.textParts??[result.text]).map(text=>({text})):[];
+  // A voice reply is one part; its text fallback is derived from the same delivery.
+  const parts=result.decision==='RESPOND'?result.mode==='voice'?[{voiceText:result.text}]:(result.textParts??[result.text]).map(text=>({text})):[];
   if(result.stickerId)parts.push({stickerId:result.stickerId});
   return parts.map((part,index)=>({...part,deliveryId:index===0?deliveryId:crypto.createHash('sha256').update(deliveryId+(part.stickerId?'\0sticker':'\0text-'+(index+1))).digest('hex'),state:'queued'}));
 }
@@ -17,7 +18,8 @@ function validReplyParts(item){
   const expected=replyDeliveryParts(item.result,item.deliveryId);
   return Array.isArray(item.parts)&&item.parts.length===expected.length&&item.parts.length<=(item.result.text?.length??0)+1&&item.parts.every((part,index)=>{
     const target=expected[index];
-    return part&&part.text===target.text&&part.stickerId===target.stickerId&&part.deliveryId===target.deliveryId&&
+    return part&&part.text===target.text&&part.stickerId===target.stickerId&&part.voiceText===target.voiceText&&part.deliveryId===target.deliveryId&&
+      (part.voiceFallback===undefined||part.voiceFallback===true&&typeof part.voiceText==='string')&&
       ['queued','sending','submitted','confirmed','unconfirmed','failed','cancelled','expired'].includes(part.state)&&
       ['busyAttempts','receiptChecks'].every(name=>part[name]===undefined||Number.isSafeInteger(part[name])&&part[name]>=0&&part[name]<=10)&&
       ['retryAt','busyDeadline'].every(name=>part[name]===undefined||Number.isSafeInteger(part[name])&&part[name]>=0);

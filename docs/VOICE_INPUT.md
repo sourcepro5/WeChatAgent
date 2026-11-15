@@ -1,6 +1,8 @@
 # 微信语音 API 转写
 
-可选插件源码位于 `optional-extensions/speech-recognition/`，交付包为 `optional-extensions/packages/speech-recognition-1.5.0.zip`。安装、授权和配置说明见该目录 README。本功能不预设 API 地址、服务商、模型或密钥。
+0.4.5 安装包预置此插件，首次打开后可在「能力 → 能力目录」配置。启用前仍需填写识别服务并授权聊天。
+
+插件源码位于 `optional-extensions/speech-recognition/`，交付包为 `optional-extensions/packages/speech-recognition-1.6.0.zip`。安装、授权和配置说明见该目录 README。本功能不预设 API 地址、服务商、模型或密钥。
 
 1.3.0 已将常见服务预设、模型匹配与请求适配移入插件，可在原有支持语音 API v2 的安装版直接导入 ZIP 使用，保持自动协议并填写地址、密钥和模型即可。旧宿主内置检测按钮不能随 ZIP 升级，对新增千问预设可能误报；实际转写由插件处理。
 

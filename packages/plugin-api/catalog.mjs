@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {validateSchema,validateValue,atomicJson,allowedChat,publicSettings} from '../extension-runtime/catalog.mjs';
-import {API_VERSION,PERMISSIONS,HOST_FEATURES,HOOKS,FEATURE_ENTRIES,requiredHostFeatures,hostContract,hostCompatibility,HOST_RUNTIME} from './contract.mjs';
+import {API_VERSION,PERMISSIONS,HOST_FEATURES,HOOKS,FEATURE_ENTRIES,requiredHostFeatures,hostContract,hostCompatibility,HOST_RUNTIME,adapterOwnsPlugin,featureConfigured} from './contract.mjs';
 export {API_VERSION,PERMISSIONS,HOST_FEATURES,HOOKS} from './contract.mjs';
 
 export const LIMITS=Object.freeze({zipBytes:8*1024*1024,expandedBytes:16*1024*1024,fileBytes:4*1024*1024,files:128,plugins:32});
@@ -99,15 +99,23 @@ export function updatePlugin(root,id,body){
   saved.config.plugins[id]={enabled:body.enabled,permissions:[...new Set(body.permissions)],chats:body.chats===null?null:[...new Set(body.chats)],settings,generation:crypto.randomUUID()};
   atomicJson(path.join(directory(root,'config'),'plugins.json'),saved.config);return configuration(root);
 }
+function builtinPluginIds(root){
+  try{
+    const file=path.join(root,'config/distribution.json'), info=fs.lstatSync(file);
+    if(!info.isFile()||info.isSymbolicLink()||info.size>65536)return [];
+    const saved=json(file);
+    return saved.installed===true&&Array.isArray(saved.builtinPlugins)?saved.builtinPlugins:[];
+  }catch{return [];}
+}
 export function pluginCatalog(root,runtime=[]){
   let saved,items;try{saved=configuration(root);items=scanPlugins(root);}catch{return {apiVersion:2,revision:null,plugins:[],error:'插件配置或目录不可读，原文件已保留。请检查 config/plugins.json 和 plugins 目录。'};}
-  const running=new Map(runtime.map(item=>[item.id,item]));
+  const running=new Map(runtime.map(item=>[item.id,item])),builtin=builtinPluginIds(root);
   return {apiVersion:API_VERSION,hostFeatures:HOST_FEATURES,hostPermissions:PERMISSIONS,hostContract:hostContract(),revision:saved.revision,plugins:items.map(item=>{
     const setting=saved.config.plugins[item.id]??{},state=running.get(item.id),enabled=setting.enabled===true;
-    return {id:item.id,name:item.name,description:item.description??'',version:item.version,apiVersion:2,host:'wechatagent',management:'wechatagent',author:item.author??'',homepage:item.homepage,
+    return {id:item.id,name:item.name,description:item.description??'',version:item.version,apiVersion:2,host:'wechatagent',management:'wechatagent',builtin:builtin.includes(item.id),author:item.author??'',homepage:item.homepage,
       revision:item.revision,invalid:!!item.invalid,enabled,permissions:setting.permissions??[],requestedPermissions:item.permissions,requiresHostFeatures:item.requiresHostFeatures??[],chats:setting.chats===null?null:setting.chats??[],
       configSchema:item.configSchema,settings:publicSettings(item,{...item.settings,...setting.settings}),actions:state?.actions??[],loaded:state?.loaded===true,active:state?.active===true,
-      reason:item.invalid?item.reason:!enabled?'已安装，尚未启用':state?.reason??'设置已保存，等待加载新版 DSH 桥接',statusLabel:item.invalid?'清单无效':!enabled?'已关闭':state?.active?'已开启':'待生效',statusTone:item.invalid?'error':!enabled?'muted':state?.active?'ok':'warning'};
+      reason:item.invalid?item.reason:!enabled?'已安装，尚未启用':adapterOwnsPlugin(item)||item.requiresHostFeatures?.includes('voice-dialogue-v1')?'设置已保存，收到语音请求时加载':state?.reason??'设置已保存，等待加载新版 DSH 桥接',statusLabel:item.invalid?'清单无效':!enabled?'已关闭':state?.active?'已开启':'待生效',statusTone:item.invalid?'error':!enabled?'muted':state?.active?'ok':'warning'};
   })};
 }
 function enabledFor(root,id,key,plugins){
@@ -131,7 +139,7 @@ export function featurePlugins(root,feature,key){
   let plugins;try{plugins=configuration(root).config.plugins;}catch{return [];}
   return Object.keys(plugins).sort().flatMap(id=>{
     const found=enabledFor(root,id,key,plugins);
-    return found&&found.item.requiresHostFeatures.includes(feature)&&found.saved.permissions.includes(entry.permission)?[{id,generation:String(found.saved.generation??'')}]:[];
+    return found&&featureConfigured(found.item,found.saved,feature)&&found.saved.permissions.includes(entry.permission)?[{id,generation:String(found.saved.generation??'')}]:[];
   });
 }
 export function runtimeCatalog(catalog,live){
@@ -145,6 +153,7 @@ export function runtimeCatalog(catalog,live){
 export function archivePlugin(root,id,revision){
   const saved=configuration(root);if(saved.revision!==revision)throw fail('插件设置已变化，请刷新后重试。',409);
   if(!ID.test(id))throw fail('插件 id 无效。');
+  if(builtinPluginIds(root).includes(id))throw fail('内置插件可以在配置中关闭。',409);
   const target=path.join(directory(root,'plugins'),id);if(!fs.existsSync(target)||fs.lstatSync(target).isSymbolicLink())throw fail('插件不存在。',404);
   const archive=path.join(directory(root,'state/plugin-archives'),id+'-'+crypto.randomUUID());
   fs.renameSync(target,archive);

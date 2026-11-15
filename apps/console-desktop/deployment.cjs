@@ -4,6 +4,60 @@ const fs = process.versions.electron ? require('original-fs') : require('node:fs
 const path = require('node:path');
 const crypto = require('node:crypto');
 
+async function seedBuiltinPlugins(template, workspace, manifest, previous) {
+  const ids = manifest.builtinPlugins ?? [];
+  const validId = id => typeof id === 'string' && /^[a-z][a-z0-9-]{0,39}$/.test(id);
+  if (!Array.isArray(ids) || ids.length > 32 || ids.some(id => !validId(id)) || new Set(ids).size !== ids.length) {
+    throw new Error('发行包内置插件清单无效。');
+  }
+  if (!ids.length) return [];
+  const plugins = path.join(workspace, 'plugins');
+  fs.mkdirSync(plugins, {recursive:true});
+  if (!fs.lstatSync(plugins).isDirectory() || fs.lstatSync(plugins).isSymbolicLink()) throw new Error('插件目录无效。');
+  const retained = Array.isArray(previous.builtinPlugins) ? previous.builtinPlugins : [];
+  const installed = [];
+  for (const id of ids) {
+    const target = path.join(plugins, id);
+    const prefix = 'optional-extensions/' + id + '/';
+    const files = manifest.files.filter(file => file.startsWith(prefix));
+    if (!files.includes(prefix+'plugin.json') || !files.includes(prefix+'index.mjs')) throw new Error('发行包内置插件文件不完整。');
+    const existing = fs.lstatSync(target, {throwIfNoEntry:false});
+    if (existing) {
+      // Exact packaged copies can also be recognized after an interrupted bootstrap.
+      const matchesPackage = () => files.every(file => {
+        const installedFile = path.join(target, file.slice(prefix.length));
+        const info = fs.lstatSync(installedFile,{throwIfNoEntry:false});
+        return info?.isFile() && !info.isSymbolicLink() && crypto.createHash('sha256')
+          .update(fs.readFileSync(installedFile)).digest('hex') === manifest.sourceHashes?.[file];
+      });
+      if (existing.isDirectory() && !existing.isSymbolicLink() && (retained.includes(id) || matchesPackage())) installed.push(id);
+      continue;
+    }
+    // Stage on the same volume and publish the complete package in one rename.
+    const scratch = path.join(workspace, 'state');
+    fs.mkdirSync(scratch, {recursive:true});
+    if (!fs.lstatSync(scratch).isDirectory() || fs.lstatSync(scratch).isSymbolicLink()) throw new Error('插件暂存目录无效。');
+    const temporary = fs.mkdtempSync(path.join(scratch, 'builtin-plugin-'));
+    try {
+      for (const file of files) {
+        const bytes = fs.readFileSync(path.join(template, file));
+        if (crypto.createHash('sha256').update(bytes).digest('hex') !== manifest.sourceHashes?.[file]) throw new Error('内置插件校验失败。');
+        const destination = path.resolve(temporary, file.slice(prefix.length));
+        if (!destination.startsWith(temporary+path.sep)) throw new Error('内置插件路径无效。');
+        fs.mkdirSync(path.dirname(destination), {recursive:true});
+        fs.writeFileSync(destination, bytes, {flag:'wx'});
+      }
+      const item = JSON.parse(fs.readFileSync(path.join(temporary,'plugin.json'),'utf8').replace(/^\uFEFF/,''));
+      if (item.id !== id || item.host !== 'wechatagent' || item.apiVersion !== 2) throw new Error('内置插件身份无效。');
+      fs.renameSync(temporary, target);
+      installed.push(id);
+    } finally {
+      if (fs.existsSync(temporary)) fs.rmSync(temporary,{recursive:true,force:true});
+    }
+  }
+  return installed;
+}
+
 async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {}, options = {}) {
   const template = path.join(resourcesPath, 'project');
   const manifestFile = path.join(template, 'deployment.json');
@@ -80,6 +134,7 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
     const currentBuild=JSON.parse(fs.readFileSync(path.join(sourceDir,'build.json'),'utf8').replace(/^\uFEFF/,''));
     if(currentBuild.targetVersion!==wechatVersion||currentBuild.integration!=='WeChatAgent-1'||currentBuild.profile!==(wechatVersion==='4.2.0.12'?'4.2.0.12-stickers-v2':'4.1.15.13-media-mentions-v2'))throw new Error('发行包新版微信组件版本无效。');
     if(wechatVersion==='4.2.0.12'&&(currentBuild.productionEnabled!==true||currentBuild.runtimeVerified!==true||currentBuild.acceptance?.coldStart!==true||currentBuild.acceptance?.textReceipt!==true||currentBuild.acceptance?.imageReceipt!==true||currentBuild.nativeStickerSend!==true||currentBuild.acceptance?.stickerReceipt!==true||currentBuild.acceptance?.animatedSticker!==true))throw new Error('发行包 4.2 组件尚未通过运行验收。');
+    if(wechatVersion==='4.2.0.12'&&currentBuild.nativeVoiceSend===true&&(currentBuild.nativeVoiceProtocol!=='silk-receipt-v1'||currentBuild.acceptance?.voiceReceipt!==true))throw new Error('发行包 4.2 语音组件尚未通过回执验收。');
     const payloads=[['wechatagent-text-'+wechatVersion+'.dll',currentBuild.sha256],['wechatagent-text-loader.exe',currentBuild.loaderSha256]].map(([file,expected])=>{
       const bytes=fs.readFileSync(path.join(sourceDir,file));
       if(crypto.createHash('sha256').update(bytes).digest('hex')!==expected)throw new Error('发行包新版微信组件校验失败。');
@@ -116,7 +171,9 @@ async function bootstrapDeployment(resourcesPath, dataHome, progress = () => {},
       fs.writeFileSync(pendingFile,JSON.stringify({...pending,pendingApply:true,dshRestartRequired:true},null,2));
     }
   }
-  fs.writeFileSync(distributionFile, JSON.stringify({ version: manifest.version, buildId:manifest.buildId, runtimeRevision:manifest.runtimeRevision, wechatVersion, bundledWechatExecutable:client, installed: true, dataHome, python, node, dshBundled, dsh, dshHome, externalDshHome, assets: resourcesPath }, null, 2));
+  const builtinPlugins = await seedBuiltinPlugins(template, workspace, manifest, previousSettings);
+  const foregroundInputPython=manifest.foregroundInputRuntime===true?python:undefined;
+  fs.writeFileSync(distributionFile, JSON.stringify({ version: manifest.version, buildId:manifest.buildId, runtimeRevision:manifest.runtimeRevision, wechatVersion, bundledWechatExecutable:client, installed: true, dataHome, python, foregroundInputPython, node, dshBundled, dsh, dshHome, externalDshHome, assets: resourcesPath, builtinPlugins }, null, 2));
   progress('本机运行环境已准备，正在打开控制台…');
   return { root: workspace, node, python, dataHome, version: manifest.version };
 }

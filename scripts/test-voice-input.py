@@ -12,7 +12,7 @@ import types
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
-from wechat_voice_input import VoiceCatalog, voice_info, audio_policy, load_voice_blob
+from wechat_voice_input import VoiceCatalog, voice_info, audio_policy, load_voice_blob, silk_frame_digest
 
 spec = importlib.util.spec_from_file_location('voice_reader_test', pathlib.Path(__file__).with_name('reader-api.py'))
 api = importlib.util.module_from_spec(spec)
@@ -20,6 +20,7 @@ spec.loader.exec_module(api)
 
 KEY = 'wechat:private:123'
 SILK = b'\x02#!SILK_V3\nsynthetic'
+FRAMED_SILK = b'\x02#!SILK_V3\x02\x00\x12\x34'
 
 
 class VoiceBoundaries(unittest.TestCase):
@@ -134,6 +135,60 @@ class VoiceBoundaries(unittest.TestCase):
         from unittest.mock import patch
         with patch.dict(sys.modules, {'pilk': None}), patch.object(decoder, 'wasm_command', return_value=None):
             with self.assertRaisesRegex(RuntimeError, 'VOICE_DECODER_MISSING'): decoder.decode(SILK)
+
+    def test_outgoing_receipt_checks_audio_digest_sender_and_message_identity(self):
+        from unittest.mock import patch
+        reader = self.reader()
+        reader.own_wxid = 'owner-account'
+        reader.selected_talkers = lambda: ['contact-alpha']
+        reader.sticker_account_active = lambda: self.active
+        self.shard(blob=FRAMED_SILK[1:]+b'\xff\xff')
+        valid = {**self.message, 'senderUsername': reader.own_wxid, 'isSend': 1}
+        reader.messages = lambda *args, **kwargs: [valid]
+        expected = hashlib.sha256(FRAMED_SILK[1:]).hexdigest()
+        self.assertEqual(silk_frame_digest(FRAMED_SILK[1:]+b'\xff\xff'), expected)
+        with self.assertRaisesRegex(RuntimeError, 'VOICE_FORMAT_UNSUPPORTED'):
+            silk_frame_digest(FRAMED_SILK[:-1])
+
+        def match(excluded=(), digest=expected):
+            return reader.match_outgoing_voice('contact-alpha', reader.own_wxid, 100, 105, set(excluded), digest)
+
+        fake = self.nt()
+        with patch.object(api.nt, 'derive_database_key', fake.derive_database_key), patch.object(api.nt, 'connect_nt_db', fake.connect_nt_db):
+            self.assertEqual(match(), {'localId': 7, 'createTime': 100, 'serverId': self.message['serverId']})
+            self.assertIsNone(match(excluded=[7]))
+            self.assertIsNone(match(digest='0'*64))
+            for fields in ({'localType': 49}, {'senderUsername': 'someone-else'}, {'isSend': 0},
+                           {'serverId': '0'}, {'createTime': 106}):
+                reader.messages = lambda *args, **kwargs: [{**valid, **fields}]
+                self.assertIsNone(match())
+            reader.messages = lambda *args, **kwargs: [valid, {**valid, 'localId': 8}]
+            self.assertIsNone(match())  # A missing second media row could be the same clip.
+            self.shard('media_1.db', blob=FRAMED_SILK, local_id=8)
+            self.assertIsNone(match())
+            reader.messages = lambda *args, **kwargs: [valid]
+            with self.assertRaises(PermissionError):
+                reader.match_outgoing_voice('other-chat', reader.own_wxid, 100, 105, set(), expected)
+            self.active = False
+            with self.assertRaises(PermissionError):
+                match()
+
+    def test_outgoing_receipt_uses_actual_sender_for_legacy_directory_identity(self):
+        from unittest.mock import patch
+        reader = self.reader()
+        reader.account = self.root / 'wxid_owner_a123'
+        reader.own_wxid = reader.account.name
+        reader.selected_talkers = lambda: ['contact-alpha']
+        reader.sticker_account_active = lambda: True
+        reader.messages = lambda *args, **kwargs: [
+            {**self.message, 'senderUsername': 'wxid_owner', 'isSend': 1}
+        ]
+        digest = silk_frame_digest(FRAMED_SILK)
+        with patch.object(api, 'load_voice_blob', return_value=FRAMED_SILK):
+            match = reader.match_outgoing_voice('contact-alpha', reader.own_wxid, 100, 105, set(), digest)
+            self.assertEqual(match['serverId'], self.message['serverId'])
+            with self.assertRaises(PermissionError):
+                reader.match_outgoing_voice('contact-alpha', 'wxid_owner', 100, 105, set(), digest)
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@ import {createPluginUiHost,pluginUiHeaders} from './plugin-ui.mjs';
 import {inspectWeChatClient} from './wechat-client-selection.mjs';
 import {feedbackSnapshot,saveFeedback} from '../packages/dsh-social-bridge-plugin/assistant-feedback.mjs';
 import {createMemoryConsole} from './memory-console.mjs';
-import {createSettingsActionRunner} from './plugin-settings-actions.mjs';
+import {createSettingsActionRunner,settingsActionBytes} from './plugin-settings-actions.mjs';
 import {createVoiceHostStatus} from './voice-host-status.mjs';
 import fs from 'node:fs';
 import {createPersonaCategories} from './persona-categories.mjs';
@@ -220,12 +220,16 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       const dshReady = health?.ok === true && health.project === 'WeChatAgent' && sameProjectPath(health.projectRoot,root) && health.contextMode === 'native-session-v1' && health.behaviorPolicy === 'local-config-only-v1' && health.imageInput === 'native-attachment-v1' && (!optionalJson(preferenceFile).dshRestartRequired || matchesDsh);
       const readerReady = !!readerState && !!value(1) && !readerState.lastError;
       const bridgeReady = !!value(4) && adapter?.ob_connected === true;
-      const hookReady = adapter?.hook_connected === true && adapter?.hook_account_verified === true && adapter?.version === config.hook.expectedVersion;
+      const inputSender = config.runtime.sender === 'wechat-input';
+      const helperSender = config.runtime.sender === 'wechat-helper';
+      const hookReady = inputSender || helperSender
+        ? adapter?.backend === config.runtime.sender && adapter?.sender_connected === true && adapter?.sender_account_verified === true
+        : adapter?.hook_connected === true && adapter?.hook_account_verified === true && adapter?.version === config.hook.expectedVersion;
       const ready = readerReady && bridgeReady && hookReady && dshReady && adapter?.reader_connected === true;
       const { rows } = buffered();
       const services = [
         { id: 'reader', label: '微信读取', ready: readerReady, detail: readerReady ? '数据库可读，消息同步正常' : readerState?.lastError ? '读取异常，请重新连接并验证' : readerFailureDetail(), port: config.ports.weflow },
-        { id: 'bridge', label: '消息桥接', ready: bridgeReady && hookReady && adapter?.reader_connected === true, detail: bridgeReady && hookReady && adapter?.reader_connected ? '收发连接正常，账号已核验' : !hookReady ? '等待匹配微信登录与发送连接' : '等待消息桥接连接', port: config.ports.adapter },
+        { id: 'bridge', label: '消息桥接', ready: bridgeReady && hookReady && adapter?.reader_connected === true, detail: bridgeReady && hookReady && adapter?.reader_connected ? (inputSender ? (adapter.paused ? '前台模拟输入已暂停，读取连接正常' : '前台模拟输入就绪，账号已核验') : '收发连接正常，账号已核验') : !hookReady ? (inputSender ? '等待干净微信登录并保持主窗口打开' : '等待匹配微信登录与发送连接') : '等待消息桥接连接', port: config.ports.adapter },
         { id: 'dsh', label: '模型连接', ready: dshReady, detail: dshReady ? 'DSH 插件已连接' : '打开 DSH（负责调用模型的桌面程序）并启用本项目插件', port: config.ports.dshPlugin },
       ];
       const running = !!readerState || !!adapter || !!value(4);
@@ -242,7 +246,8 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     if (['start', 'stop', 'restart', 'prepare'].includes(action)) return ps('manage.ps1', action);
     if (action === 'setup') return ps(fs.existsSync(path.join(root, 'config', 'distribution.json')) ? 'check-runtime.ps1' : 'setup.ps1');
     if (action === 'dsh-open') return ps('launch-dsh.ps1');
-    if (action === 'wechat-open') return ps('launch-hook-wechat.ps1', ...(fs.existsSync(path.join(root,'state/hook/native/build.previous.json')) ? ['-UpdateHook'] : []));
+    if (action === 'input-setup') return { ...ps('setup-input.ps1'), timeoutMs: 180000 };
+    if (action === 'wechat-open') return ps('launch-hook-wechat.ps1', ...(snapshot().config.runtime.sender === 'wechat-hook' && fs.existsSync(path.join(root,'state/hook/native/build.previous.json')) ? ['-UpdateHook'] : []));
     if (action === 'hook-build') return ps('build-hook.ps1');
     if (action === 'hook-pin') return ps('pin-hook-client.ps1');
     if (action === 'hook-unpin') return ps('pin-hook-client.ps1', '-Unlock');
@@ -288,7 +293,7 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
     const checkRevision = readerRevision();
     const initialConfigRevision = snapshot().revision;
     const spec = connectRequest ? {} : command(body.action, body);
-    spec.timeoutMs = ['setup', 'hook-build', 'hook-test'].includes(body.action) ? 1200000 : ['start', 'restart'].includes(body.action) ? 180000 : 150000;
+    spec.timeoutMs = ['setup', 'hook-build', 'hook-test'].includes(body.action) ? 1200000 : body.action === 'input-setup' ? 300000 : ['start', 'restart'].includes(body.action) ? 180000 : 150000;
     const id = crypto.randomUUID();
     const job = { id, action: body.action, state: 'running', startedAt: Date.now(), output: '', exitCode: null };
     jobs.set(id, job); activeJob = id; latestJob = id;
@@ -520,14 +525,16 @@ export function createConsole({ root = projectRoot, port = 3210, runner, readerS
       }
       if (req.method !== 'POST') throw fault('接口不存在。', 404);
       if (!req.headers['content-type']?.startsWith('application/json')) throw fault('请使用控制台表单。', 415);
-      const body = await readBody(req,['/api/sticker-manager/import','/api/plugins/inspect'].includes(route)?11300000:128*1024);
+      const settingsAction=/^\/api\/plugins\/([a-z][a-z0-9-]{0,39})\/settings-actions\/([a-z][a-z0-9-]{0,19})$/.exec(route);
+      const bodyLimit=settingsAction?settingsActionBytes(settingsAction[1],settingsAction[2])
+        :['/api/sticker-manager/import','/api/plugins/inspect'].includes(route)?11300000:128*1024;
+      const body = await readBody(req,bodyLimit);
       if(route==='/api/updates/check')return reply(200,await updates.check({force:true}));
       if (route === '/api/jobs') return reply(202, startJob(body));
       assertIdle();
       if(route==='/api/plugins/inspect'){const result=pluginInstaller.inspect(body);let live=null;try{live=await plugin('/health');}catch{}const staged=pluginInstaller.tickets.get(result.ticket)?.folder;return reply(200,{...result,hasPages:!!staged&&fs.existsSync(path.join(staged,'ui.json')),compatibility:hostCompatibility(result.plugin,live)});}
       if(route==='/api/plugins/install'){const result=pluginInstaller.install(body);pluginPages.revoke(result.id);settingsActions.cancel(result.id);return reply(200,result);}
       if(route==='/api/plugins/cancel')return reply(200,pluginInstaller.cancel(body.ticket));
-      const settingsAction=/^\/api\/plugins\/([a-z][a-z0-9-]{0,39})\/settings-actions\/([a-z][a-z0-9-]{0,19})$/.exec(route);
       if(settingsAction){
         const controller=new AbortController(),closed=()=>{if(!res.writableEnded)controller.abort();};res.once('close',closed);
         try{return reply(200,await settingsActions.run(settingsAction[1],settingsAction[2],body,{signal:controller.signal}));}

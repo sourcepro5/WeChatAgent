@@ -27,7 +27,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wechat_files import FILE_TYPE, parse_file_message, FileCatalog
-from wechat_voice_input import VoiceCatalog, voice_info, load_voice_blob, audio_result
+from wechat_voice_input import VoiceCatalog, voice_info, load_voice_blob, audio_result, silk_frame_digest
 from wechat_media import clean_account_wxid, image_cache_current
 from wechat_forwarded import FORWARD_TYPE, parse_forwarded_record
 from wechat_quote import QUOTE_TYPE, parse_quote_reply
@@ -367,14 +367,14 @@ class Reader:
         candidates = dict.fromkeys([*settings.get('messagePushFilterList', []), *self.names, *(bindings.records if bindings else {})])
         return [talker for talker in candidates if self.conversation_id(talker) in map(str, project['wechat']['whitelist']['groups' if group_username(talker) else 'private'])]
 
-    def messages(self, talker, limit=100, from_time=None):
+    def messages(self, talker, limit=100, from_time=None, to_time=None):
         if talker not in self.selected_talkers():
             raise PermissionError('Conversation is not selected')
         connections = self.open_messages()
         try:
             reports = []
             data = nt.get_messages(connections, talker, limit=limit, name_map=self.names,
-                own_wxid=self.own_wxid, from_time=from_time, shard_report=reports)
+                own_wxid=self.own_wxid, from_time=from_time, to_time=to_time, shard_report=reports)
             if any(report.get('reason') for report in reports):
                 raise RuntimeError('Message query did not cover every readable shard')
             # Preserve complete text: the upstream CLI display truncates to 200.
@@ -416,6 +416,46 @@ class Reader:
         config = read_json(self.root / 'config' / 'wechatagent.json')
         kind = 'groups' if '@chatroom' in talker else 'private'
         return self.conversation_id(talker) in map(str, config['wechat']['whitelist'][kind])
+
+    def match_outgoing_voice(self, talker, account, after, before, excluded, digest):
+        if account != self.own_wxid or talker not in self.selected_talkers() or not self.sticker_account_active():
+            raise PermissionError('Voice receipt is not authorized')
+        # Authorize the configured reader identity and compare the database's actual sender ID.
+        sender_wxid = clean_account_wxid(account) if account.lower() == self.account.name.lower() else account
+        if not self.voice_slots.acquire(blocking=False):
+            return None
+        try:
+            deadline = time.monotonic()+3
+            rows = self.messages(talker, limit=101, from_time=after, to_time=before)
+            if len(rows) >= 101:
+                return None
+            candidates = [row for row in rows if row.get('localType') == 34 and row.get('isSend') == 1
+                          and row.get('senderUsername') == sender_wxid and type(row.get('localId')) is int
+                          and row['localId'] > 0 and row['localId'] not in excluded
+                          and type(row.get('createTime')) is int and after <= row['createTime'] <= before]
+            if len(candidates) > 4 or len({row['localId'] for row in candidates}) != len(candidates):
+                return None
+            matching = []
+            for row in candidates:
+                try:
+                    raw = load_voice_blob(self.account, {'talker': talker, 'localId': row['localId'],
+                                                        'passphrase': self.passphrase}, nt, deadline=deadline)
+                    if silk_frame_digest(raw) == digest:
+                        matching.append(row)
+                except RuntimeError:
+                    # An unreadable candidate could be another copy of this clip.
+                    return None
+            if len(matching) != 1:
+                return None
+            row = matching[0]
+            server_id = str(row.get('serverId', ''))
+            if not re.fullmatch(r'[1-9][0-9]{0,31}', server_id):
+                return None
+            if talker not in self.selected_talkers() or not self.sticker_account_active():
+                raise PermissionError('Voice receipt is not authorized')
+            return {'localId': row['localId'], 'serverId': server_id, 'createTime': row['createTime']}
+        finally:
+            self.voice_slots.release()
 
     def resolve_voice(self, voice_id, key, plugin_id, format='wav'):
         if format not in ('wav', 'silk'):
@@ -989,6 +1029,22 @@ def serve(reader, port, token):
                 elif url.path == '/api/v1/messages':
                     talker = query.get('talker', [''])[0]
                     self.respond({'success': True, 'messages': reader.messages(talker, limit) if talker else []})
+                elif url.path == '/api/v1/outgoing-voice-receipt':
+                    talker = query.get('talker', [''])[0]
+                    account = query.get('account', [''])[0]
+                    digest = query.get('digest', [''])[0]
+                    after = query.get('after', [''])[0]
+                    before = query.get('before', [''])[0]
+                    baseline = query.get('baseline', [''])[0]
+                    excluded = baseline.split(',') if baseline else []
+                    if (not re.fullmatch(r'[a-f0-9]{64}', digest) or
+                            not all(re.fullmatch(r'[1-9][0-9]{0,9}', value) for value in (after, before)) or
+                            not 0 <= int(before)-int(after) <= 60 or len(excluded) > 100 or
+                            not all(re.fullmatch(r'[1-9][0-9]{0,15}', value) for value in excluded)):
+                        self.respond({'success': False, 'error': 'Invalid voice receipt query'}, 400)
+                        return
+                    match = reader.match_outgoing_voice(talker, account, int(after), int(before), set(map(int, excluded)), digest)
+                    self.respond({'success': True, 'match': match})
                 elif url.path == '/api/v1/reader/status':
                     self.respond({'success': True, 'backend': 'weflow-cli-nt', 'lastPoll': reader.last_poll,
                         'lastError': reader.last_error, 'subscribers': len(reader.clients), 'pushed': reader.pushed,

@@ -24,6 +24,9 @@ const stage = path.join(root, 'state', 'installer-stage');
 const appDir = path.join(stage, 'app');
 const project = path.join(stage, 'project');
 const vendor = path.join(stage, 'vendor');
+const bundledPython=path.join(stage,'runtime/python/python.exe');
+const inputProbe=spawnSync(bundledPython,['-B','-c','import psutil,win32api,win32clipboard,win32gui,win32process'],{windowsHide:true,encoding:'utf8',timeout:30000});
+if(inputProbe.status!==0)throw new Error('Bundled foreground input dependencies are unavailable. Run prepare-installer-runtime.mjs first. '+(inputProbe.stderr||''));
 const require = createRequire(path.join(root, 'package.json'));
 const pluginPackage = JSON.parse(fs.readFileSync(path.join(root,'packages/dsh-social-bridge-plugin/package.json'),'utf8'));
 const sdkPackage = JSON.parse(fs.readFileSync(path.join(root,'packages/dsh-social-bridge-plugin/node_modules/@deepseek-ai/dsh-llm/package.json'),'utf8'));
@@ -105,13 +108,15 @@ add('scripts/plugin-config-ui.mjs');
 add('scripts/plugin-ui.mjs');
 add('scripts/pack-bundled-plugins.mjs');
 add('docs/VOICE_INPUT.md');
-for(const name of ['wechat_voice_input.py','decode-wechat-voice.py','decode-wechat-voice.mjs','voice-requirements.txt'])add('scripts/'+name);
+for(const name of ['wechat_voice_input.py','decode-wechat-voice.py','decode-wechat-voice.mjs','voice-send.mjs','voice-synthesis.mjs','realtime-reply.mjs','input-sender.mjs','input-worker.py','input-requirements.txt','setup-input.ps1','wechat_voice_output.py','voice-requirements.txt'])add('scripts/'+name);
 for(const file of ['package.json','LICENSE','PROVENANCE.json','lib/index.mjs','lib/silk.wasm'])add('packages/voice-codec/silk-wasm/'+file);
 add('scripts/pack-plugin.mjs');
+for (const name of ['__init__.py','plugin.json']) add('extensions/wechatagent_voice/'+name);
 for(const bundle of BUNDLED_PLUGINS){
   for(const file of bundle.files)add(bundle.source+'/'+file);
   if(bundle.zip){add(bundle.zip);add(bundle.zip+'.sha256');}
 }
+const builtinPlugins=BUNDLED_PLUGINS.filter(bundle=>bundle.builtin===true).map(bundle=>bundle.id);
 add('optional-extensions/packages/README.md');
 addTree('extensions/skills/meme-search', (name, dir) => dir || /\.(js|json|md)$/.test(name));
 fs.writeFileSync(path.join(project, 'components/qq-bridge/package.json'), JSON.stringify({ name:'wechatagent-social-bridge', type:'module', private:true, license:'MIT' })); files.push('components/qq-bridge/package.json');
@@ -140,8 +145,8 @@ const fileList = [...new Set(files)].sort();
 const sourceHashes = Object.fromEntries(fileList.map(file => [file, sha(fs.readFileSync(path.join(project,file)))]));
 const desktopHashes = Object.fromEntries(fs.readdirSync(appDir).filter(file=>fs.statSync(path.join(appDir,file)).isFile()).sort().map(file=>[file,sha(fs.readFileSync(path.join(appDir,file)))]));
 const runtimeRevision = sha(Buffer.from(JSON.stringify({node:sha(fs.readFileSync(process.execPath)),python:fs.readFileSync(path.join(stage,'runtime/python/DEPENDENCIES.json'),'utf8')}))).slice(0,12);
-const buildId = sha(Buffer.from(JSON.stringify({sourceHashes,desktopHashes,runtimeRevision,hook:legacyBuild?.sha256??null,currentHook:currentBuild?.sha256??null,currentLoader:currentBuild?.loaderSha256??null}))).slice(0,16);
-fs.writeFileSync(path.join(project, 'deployment.json'), JSON.stringify({ version, packageVersion, buildId, builtAt:new Date().toISOString(), runtimeRevision, wechatVersion, bundledWechatVersions:[wechatVersion], nativeProfile:currentBuild?.profile??null, sourceHashes, files:fileList, presets:presetNames.map(name=>name.slice(0,-3)), node:process.version, python:'3.13.16', dshBundled:false,dshSdkVersion:DSH_SDK_VERSION,dshInstallUrl:DSH_INSTALL_URL, privateAccountDataIncluded:false, authorization:'Maintainer confirmed redistribution authorization for all currently used components and requested all current role files as bundled presets on 2026-10-05.' }, null, 2));
+const buildId = sha(Buffer.from(JSON.stringify({sourceHashes,desktopHashes,builtinPlugins,runtimeRevision,hook:legacyBuild?.sha256??null,currentHook:currentBuild?.sha256??null,currentLoader:currentBuild?.loaderSha256??null}))).slice(0,16);
+fs.writeFileSync(path.join(project, 'deployment.json'), JSON.stringify({ version, packageVersion, buildId, builtAt:new Date().toISOString(), runtimeRevision, foregroundInputRuntime:true, wechatVersion, bundledWechatVersions:[wechatVersion], nativeProfile:currentBuild?.profile??null, sourceHashes, files:fileList, builtinPlugins, presets:presetNames.map(name=>name.slice(0,-3)), node:process.version, python:'3.13.16', dshBundled:false,dshSdkVersion:DSH_SDK_VERSION,dshInstallUrl:DSH_INSTALL_URL, privateAccountDataIncluded:false, authorization:'Maintainer confirmed redistribution authorization for all currently used components and requested all current role files as bundled presets on 2026-10-05.' }, null, 2));
 // No personal data can enter the deployment template or vendor programs.
 for (const file of fs.readdirSync(project, { recursive:true })) {
   const relative = String(file).replaceAll('\\','/');

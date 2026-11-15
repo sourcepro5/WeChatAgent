@@ -37,6 +37,41 @@ async function codec(){
   catch{throw fault('VOICE_DECODER_MISSING');}
 }
 
+export function voicePcm(wav){
+  const invalid=()=>Object.assign(fault('VOICE_INVALID_WAV'),{code:'VOICE_INVALID_WAV',status:400});
+  if(wav.length<44||wav.length>MAX_BYTES||wav.toString('ascii',0,4)!=='RIFF'||
+    wav.readUInt32LE(4)!==wav.length-8||wav.toString('ascii',8,12)!=='WAVE')throw invalid();
+  let format,pcm,offset=12;
+  while(offset+8<=wav.length){
+    const kind=wav.toString('ascii',offset,offset+4);
+    const size=wav.readUInt32LE(offset+4);
+    const end=offset+8+size;
+    if(end+(size%2)>wav.length)throw invalid();
+    if(kind==='fmt '){
+      if(format||size<16)throw invalid();
+      format=wav.subarray(offset+8,end);
+    }
+    if(kind==='data'){
+      if(pcm)throw invalid();
+      pcm=wav.subarray(offset+8,end);
+    }
+    offset=end+(size%2);
+  }
+  if(offset!==wav.length||!format||format.readUInt16LE(0)!==1||format.readUInt16LE(2)!==1||
+    format.readUInt32LE(4)!==16000||format.readUInt32LE(8)!==32000||format.readUInt16LE(12)!==2||
+    format.readUInt16LE(14)!==16||!pcm?.length||pcm.length%2||pcm.length>32000*60)throw invalid();
+  return pcm;
+}
+
+export async function encodeVoice(wav){
+  const pcm=voicePcm(wav);
+  const {encode}=await codec();
+  const encoded=await encode(pcm,16000);
+  const silk=Buffer.from(encoded.data);
+  validateSilk(silk);
+  return {silk,durationMs:encoded.duration};
+}
+
 export async function decodeVoice(bytes){
   const {start,end}=validateSilk(bytes);
   const {decode}=await codec();

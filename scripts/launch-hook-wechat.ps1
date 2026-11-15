@@ -1,10 +1,64 @@
-param([switch]$PrepareOnly,[switch]$UpdateHook)
+param([switch]$PrepareOnly,[switch]$UpdateHook,[switch]$VoiceCandidate)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 & node (Join-Path $PSScriptRoot 'project-config.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Project configuration invalid.' }
 $config = Get-Content -LiteralPath (Join-Path $root 'config\wechatagent.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($config.runtime.sender -ne 'wechat-hook') { throw 'Set runtime.sender to wechat-hook first.' }
+if ($config.runtime.sender -notin @('wechat-hook','wechat-input','wechat-helper')) { throw 'Unsupported WeChat sender.' }
+if ($VoiceCandidate -and ($config.runtime.sender -ne 'wechat-hook' -or $config.hook.expectedVersion -ne '4.2.0.12')) {
+    throw 'The voice candidate requires the 4.2.0.12 WeChatAgent Hook.'
+}
+if ($config.runtime.sender -eq 'wechat-helper') {
+    if ($PrepareOnly -or $UpdateHook) { throw 'Helper mode opens the client as installed and never installs the WeChatAgent Hook.' }
+    $exe = if ([IO.Path]::IsPathRooted($config.hook.wechatExecutable)) { [IO.Path]::GetFullPath($config.hook.wechatExecutable) } else { [IO.Path]::GetFullPath((Join-Path $root $config.hook.wechatExecutable)) }
+    if (-not (Test-Path -LiteralPath $exe)) { throw 'HELPER_CLIENT_MISSING: Select the WeChat 4.2.0.12 client used by Helper.' }
+    if ((Get-Item -LiteralPath $exe).VersionInfo.FileVersion -ne '4.2.0.12') { throw 'HELPER_CLIENT_VERSION_MISMATCH: Helper sending requires WeChat 4.2.0.12.' }
+    $signature = Get-AuthenticodeSignature -LiteralPath $exe
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Tencent') { throw 'HELPER_CLIENT_SIGNATURE_INVALID: WeChat executable signature check failed.' }
+    $directory = Split-Path -Parent $exe
+    if (Test-Path -LiteralPath (Join-Path $directory 'version.dll')) { throw 'HELPER_CLIENT_HAS_PROXY_DLL: Remove the WeChatAgent Hook proxy DLL or select a clean client for Helper.' }
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object { $_.CommandLine -notmatch '--type=|--crashpad-handler' })
+    $other = @($running | Where-Object { -not $_.ExecutablePath -or $_.ExecutablePath -ne $exe })
+    if ($other.Count) { throw 'HELPER_OTHER_WECHAT_RUNNING: Exit the other WeChat from its tray icon first.' }
+    foreach ($client in $running) {
+        # Helper and the WeChatAgent Hook must not patch the same process.
+        $hooked = @((Get-Process -Id $client.ProcessId -ErrorAction SilentlyContinue).Modules | Where-Object { $_.ModuleName -like 'wechatagent-*.dll' })
+        if ($hooked.Count) { throw 'HELPER_CLIENT_HAS_HOOK: This WeChat was opened in Hook mode. Exit it from the tray icon, then open it again here.' }
+    }
+    if ($running.Count) { Write-Output 'Selected WeChat is running without the WeChatAgent Hook. Start Helper and connect this account.'; exit 0 }
+    try { & (Join-Path $PSScriptRoot 'pin-hook-client.ps1') }
+    catch { if ($_.Exception.Message -notlike 'CLIENT_PIN_SCOPE_REQUIRED*') { throw } }
+    Start-Process -FilePath $exe -WorkingDirectory $directory -WindowStyle Normal
+    Write-Output 'WeChat opened without the WeChatAgent Hook. Log in, start Helper with the wechatagent_voice plugin, then start WeChatAgent.'
+    exit 0
+}
+if ($config.runtime.sender -eq 'wechat-input') {
+    if ($PrepareOnly -or $UpdateHook) { throw 'Foreground input mode opens a clean client and never installs a native sender.' }
+    $inputExecutable=if($config.input.wechatExecutable){$config.input.wechatExecutable}else{$config.hook.wechatExecutable}
+    if(-not $inputExecutable){throw 'INPUT_CLIENT_REQUIRED: Select a matching Weixin.exe.'}
+    $exe = if ([IO.Path]::IsPathRooted($inputExecutable)) { [IO.Path]::GetFullPath($inputExecutable) } else { [IO.Path]::GetFullPath((Join-Path $root $inputExecutable)) }
+    if (-not (Test-Path -LiteralPath $exe)) { throw 'INPUT_CLIENT_MISSING: Select an existing Weixin.exe for foreground input.' }
+    $signature = Get-AuthenticodeSignature -LiteralPath $exe
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Tencent') { throw 'INPUT_CLIENT_SIGNATURE_INVALID: WeChat executable signature check failed.' }
+    $directory = Split-Path -Parent $exe
+    if (Test-Path -LiteralPath (Join-Path $directory 'version.dll')) { throw 'INPUT_CLIENT_HAS_PROXY_DLL: Select a clean official WeChat directory without a Hook proxy DLL.' }
+    $running = @(Get-CimInstance Win32_Process -Filter "Name='Weixin.exe'" | Where-Object { $_.CommandLine -notmatch '--type=|--crashpad-handler' })
+    $other = @($running | Where-Object { -not $_.ExecutablePath -or $_.ExecutablePath -ne $exe })
+    if ($other.Count) { throw 'INPUT_OTHER_WECHAT_RUNNING: Exit the other WeChat (for example the Hook client) from its tray icon first.' }
+    if ($running.Count) {
+        $loaded=@($running | ForEach-Object { (Get-Process -Id $_.ProcessId -ErrorAction Stop).Modules } | Where-Object ModuleName -like 'wechatagent-*.dll')
+        if($loaded.Count){throw 'INPUT_CLIENT_HAS_HOOK: Exit WeChat from the tray and open it again in foreground input mode.'}
+        Write-Output 'Selected clean WeChat is running. Keep its main window open (minimized is fine).'
+        exit 0
+    }
+    # Same default client protection as the Hook path; clients outside state/hook are left untouched.
+    try { & (Join-Path $PSScriptRoot 'pin-hook-client.ps1') }
+    catch { if ($_.Exception.Message -notlike 'CLIENT_PIN_SCOPE_REQUIRED*') { throw } }
+    # No load script: the client starts exactly as installed, without any Hook module.
+    Start-Process -FilePath $exe -WorkingDirectory $directory -WindowStyle Normal
+    Write-Output 'Clean WeChat opened for foreground input. Log in, then start WeChatAgent.'
+    exit 0
+}
 $exe = if ([IO.Path]::IsPathRooted($config.hook.wechatExecutable)) { [IO.Path]::GetFullPath($config.hook.wechatExecutable) } else { [IO.Path]::GetFullPath((Join-Path $root $config.hook.wechatExecutable)) }
 if (-not (Test-Path -LiteralPath $exe)) { throw 'Matching WeChat client missing. Follow docs/WECHAT_HOOK.md to download and extract it.' }
 if ((Get-Item -LiteralPath $exe).VersionInfo.FileVersion -ne $config.hook.expectedVersion) { throw 'Client version mismatch; Hook not installed.' }
@@ -17,7 +71,9 @@ if ($config.hook.expectedVersion -in @('4.1.15.13','4.2.0.12')) {
         Open-HookClient $exe $config.hook.baseUrl
     }
     $loadScript=if($config.hook.expectedVersion -eq '4.2.0.12'){'load-hook-42012.ps1'}else{'load-hook-current.ps1'}
-    & (Join-Path $PSScriptRoot $loadScript) -Executable $exe -BaseUrl $config.hook.baseUrl -PrepareOnly:$PrepareOnly
+    $loadOptions=@{Executable=$exe;BaseUrl=$config.hook.baseUrl;PrepareOnly=$PrepareOnly}
+    if($VoiceCandidate){$loadOptions.VoiceCandidate=$true}
+    & (Join-Path $PSScriptRoot $loadScript) @loadOptions
     exit
 }
 $directory = Split-Path -Parent $exe

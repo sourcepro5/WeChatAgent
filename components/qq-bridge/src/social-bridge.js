@@ -82,6 +82,8 @@ const engine = new SocialEngine({ buffer,connection, roleFor: key => personaFor(
   stickerLabelsFor: (message,ids)=>adapter.stickerLabels({kind:message.kind,target:message.conversation_id,ids}),
   saveStickerLabels: (message,labels)=>adapter.saveStickerLabels({kind:message.kind,target:message.conversation_id,labels}),
   sendSticker: (message,id,options)=>adapter.sendSticker({kind:message.kind,target:message.conversation_id,id,...options}),
+  sendVoice: (message, text, options) => adapter.sendVoiceText({ kind: message.kind, target: message.conversation_id, text, deliveryId: options?.deliveryId }),
+  voiceReplyFor: message => adapter.voiceCapability({ kind: message.kind, target: message.conversation_id }).then(result => result.voice === true),
   send: (message, text, options) => adapter.sendText({ kind: message.kind, target: message.conversation_id, text,deliveryId:options?.deliveryId }), log });
 const memberSettings=()=>config.search_policy_file?JSON.parse(fs.readFileSync(config.search_policy_file,'utf8').replace(/^\uFEFF/,'' )).wechat:wechat;
 const memberHistory=scopeHistory(baseHistoryStore,()=> 'assistant-chat',{fixedMode:'assistant-chat'});

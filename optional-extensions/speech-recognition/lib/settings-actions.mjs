@@ -1,5 +1,6 @@
-import {speechFailureHelp} from './presets.mjs';
+import {speechFailureHelp,prepareSpeechSettings} from './presets.mjs';
 import {discoverModels,inspectConfiguration,probeTranscription,errorMessage} from './diagnostics.mjs';
+import {resolveApi} from './recognize.mjs';
 
 // Settings-page actions (ui.json settings.actions). The host runs them in a
 // short-lived worker with the saved settings in ctx.settings and no chat or
@@ -33,16 +34,74 @@ export function summary(report) {
   return {state: 'pending', ready: false, label: '待测试识别', message: report.models?.ok ? '读取模型不代表转写成功，请点击测试识别。' : report.models?.message ?? '请点击测试识别。'};
 }
 
+// Standard protocols the test may switch between. Template ("custom") and
+// Anthropic setups are deliberate and never switched automatically.
+const STANDARD = ['openai-transcriptions', 'openai-chat', 'chat-audio-data-url'];
+const SERVICE = {'openai-transcriptions': 'transcriptions', 'openai-chat': 'chat-audio', 'chat-audio-data-url': 'chat-audio-data-url'};
+// Only errors that suggest "wrong request shape". Auth, quota, timeouts and
+// network failures would fail the same way on every protocol.
+const SWITCHABLE = /^VOICE_API_(?:HTTP_(?:400|404|405|415|422)|RESPONSE_INVALID|EMPTY_TRANSCRIPT)$/;
+const ACTION_BUDGET_MS = 32000;
+
+function protocolOf(settings) {
+  try { return resolveApi(settings).protocol; } catch { return ''; }
+}
+
+// Same endpoint and model under another standard protocol: a full route is
+// reduced to its base so the new protocol appends its own path.
+export function protocolVariant(settings, apiProtocol) {
+  const variant = prepareSpeechSettings(settings, SERVICE[apiProtocol]);
+  try {
+    const url = new URL(variant.endpoint);
+    url.pathname = url.pathname.replace(/\/+$/, '').replace(/\/(?:audio\/transcriptions|chat\/completions)$/, '');
+    variant.endpoint = url.href.replace(/\/$/, '');
+  } catch {}
+  return variant;
+}
+
 export function createSettingsActions(schema, {fetchImpl = fetch, now = Date.now} = {}) {
   const decoderOf = args => ({checked: args.decoder?.checked === true, decoder: args.decoder?.decoder === true, ...(typeof args.decoder?.reason === 'string' ? {reason: args.decoder.reason.slice(0, 200)} : {})});
+  // Built-in sample only: try the other standard protocols when the first
+  // one looks like the wrong request shape. At most three requests in total.
+  async function tryProtocols(ctx, settings, first, started) {
+    const current = protocolOf(settings), attempts = [{protocol: current, ok: first.ok, ...(first.code ? {code: first.code} : {})}];
+    if (first.ok || !SWITCHABLE.test(first.code ?? '') || !STANDARD.includes(current)) return {attempts};
+    for (const apiProtocol of STANDARD.filter(item => item !== current)) {
+      const left = ACTION_BUDGET_MS - (now() - started);
+      if (left < 4000 || ctx.signal?.aborted) break;
+      let variant;
+      try { variant = protocolVariant(settings, apiProtocol); } catch { continue; }
+      variant.timeoutMs = Math.min(settings.timeoutMs ?? 20000, left - 1500);
+      const tested = await probeTranscription(variant, {signal: ctx.signal, fetchImpl});
+      attempts.push({protocol: apiProtocol, ok: tested.ok, ...(tested.code ? {code: tested.code} : {})});
+      if (tested.ok) {
+        const {timeoutMs, ...kept} = variant;
+        const switched = Object.fromEntries(['apiProtocol', 'endpoint', 'requestMode', 'audioFormat', 'responseMode', 'responsePath'].map(key => [key, kept[key]]));
+        return {attempts, switched, settings: {...variant, timeoutMs: settings.timeoutMs}, probe: tested};
+      }
+      if (!SWITCHABLE.test(tested.code ?? '')) break;
+    }
+    return {attempts};
+  }
   async function report(ctx, args, probe) {
-    const settings = draftSettings(ctx, args.settings, schema), capabilities = decoderOf(args);
+    const started = now(), capabilities = decoderOf(args);
+    let settings = draftSettings(ctx, args.settings, schema);
     const initial = inspectConfiguration(settings, capabilities);
-    const [models, tested] = await Promise.all([
+    const [models, first] = await Promise.all([
       discoverModels(settings, {signal: ctx.signal, fetchImpl}),
       probe && initial.configurationValid ? probeTranscription(settings, {signal: ctx.signal, fetchImpl}) : undefined,
     ]);
-    const value = {checkedAt: now(), audioFormat: settings.audioFormat, model: settings.model.trim(), models, capabilities, configuration: inspectConfiguration(settings, capabilities, models.models)};
+    let tested = first, extra = {};
+    if (first) {
+      const result = await tryProtocols(ctx, settings, first, started);
+      extra = {attempts: result.attempts};
+      if (result.switched) {
+        extra.switched = {from: protocolOf(settings), ...result.switched};
+        settings = result.settings;
+        tested = result.probe;
+      }
+    }
+    const value = {checkedAt: now(), audioFormat: settings.audioFormat, model: settings.model.trim(), models, capabilities, configuration: inspectConfiguration(settings, capabilities, models.models), ...extra};
     if (tested) value.probe = {...tested, testedAt: now()};
     value.summary = summary(value);
     return redact(value, settings);

@@ -12,6 +12,29 @@ ID = re.compile(r'^[a-f0-9]{64}$')
 MAX_SILK_BYTES = 2 * 1024 * 1024
 
 
+def silk_frame_digest(data):
+    """Hash the same SILK stream regardless of Tencent prefix or EOF marker."""
+    start = int(data.startswith(b'\x02'))
+    if len(data) > MAX_SILK_BYTES or data[start:start+9] != b'#!SILK_V3':
+        raise RuntimeError('VOICE_FORMAT_UNSUPPORTED')
+    end = len(data)
+    offset, frames = start+9, 0
+    while offset < end:
+        if offset+2 > end:
+            raise RuntimeError('VOICE_FORMAT_UNSUPPORTED')
+        size = int.from_bytes(data[offset:offset+2], 'little')
+        if size == 65535 and offset+2 == end:
+            end = offset
+            break
+        offset += 2+size
+        frames += 1
+        if not size or offset > end or frames > 3025:
+            raise RuntimeError('VOICE_FORMAT_UNSUPPORTED')
+    if not frames:
+        raise RuntimeError('VOICE_FORMAT_UNSUPPORTED')
+    return hashlib.sha256(data[start:end]).hexdigest()
+
+
 def voice_info(text):
     if not isinstance(text, str) or len(text) > 100000 or re.search(r'<!DOCTYPE|<!ENTITY', text, re.I):
         return None
@@ -85,13 +108,15 @@ class VoiceCatalog:
         return item
 
 
-def load_voice_blob(account, record, nt):
+def load_voice_blob(account, record, nt, *, deadline=None):
     """Query only this chat/local ID; reject conflicting payloads across shards."""
     folder = pathlib.Path(account)/'db_storage/message'
     shards = sorted(p for p in folder.glob('media_*.db') if re.fullmatch(r'media_\d+\.db', p.name))
     if len(shards) > 64:
         raise RuntimeError('VOICE_SHARD_LIMIT')
-    blobs, deadline = {}, time.monotonic()+5
+    blobs = {}
+    if deadline is None:
+        deadline = time.monotonic()+5
     for shard in shards:
         if time.monotonic() >= deadline:
             raise RuntimeError('VOICE_DATABASE_TIMEOUT')

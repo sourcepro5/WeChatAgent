@@ -17,15 +17,16 @@
 WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 DeepSeek Harness（DSH），还能通过微信交办已授权的任务。
 有问题可以添加Q群：550582874
 
-**[下载 Windows 安装器 0.4.3](https://github.com/sourcepro5/WeChatAgent/releases/download/v0.4.3/WeChatAgent-Setup-0.4.3-x64.exe)** · [快速开始](#快速开始) · [插件下载](#插件安装) · [使用教程](#使用教程) · [常见问题](#常见问题) · [发布说明](RELEASE_NOTES.md)
+**[下载 Windows 安装器](https://github.com/sourcepro5/WeChatAgent/releases/tag/v0.4.5)** · [快速开始](#快速开始) · [语音设置](#语音设置) · [插件下载](#插件安装) · [使用教程](#使用教程) · [发布说明](RELEASE_NOTES.md)
 
 
 ## 能做什么
 
 - **人格聊天**：为好友和群聊绑定人格，独立保留上下文，支持图片与表情理解；发送能力依所选微信适配版本而定。
 - **远程助手**：通过微信交办任务，使用当前聊天已授权的 DSH 工具与技能。
-- **能力扩展**：按需启用联网搜索、公开网页阅读和 ZIP 插件，为指定聊天配置能力与权限。插件可以提供自己的操作和配置页面。
-- **界面主题**：在顶栏“更多 → 主题预设”切换液态玻璃、“罗德岛 · PRTS”或“冻土与火种”。[主题预设](docs/THEME_PRESETS.md)
+- **语音对话**：转写收到的微信语音。配置语音对话 API 后，DSH 可以沿用当前人格和上下文，按每轮对话选择文字回复或微信原生语音。
+- **能力扩展**：按需启用联网搜索、公开网页阅读和 ZIP 插件，为指定聊天配置能力与权限；插件可自带页面和配置页。
+- **界面主题**：默认液态玻璃，另有“罗德岛 · PRTS”“冻土与火种”两套主题预设，可在顶栏“更多 → 主题预设”切换。
 
 ## 开始之前
 
@@ -39,9 +40,13 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 安装版包含所需的 Node.js、Python 和读取依赖，
 普通用户无需安装开发工具。
 
-**0.4.3 全新安装使用微信 4.2.0.12 x64。** 升级保留已有客户端选择、账号和聊天数据，可在“设置 → 微信与 DSH”切换客户端。[安装说明](docs/INSTALLER_RELEASE.md) · [微信程序与版本选择](docs/WECHAT_CLIENT_SELECTION.md)
+当前兼容版本和安装范围见
+[安装说明](docs/INSTALLER_RELEASE.md)。
 
-4.2.0.12 已通过冷启动登录，以及向文件传输助手发送文字、普通图片和原生动画 GIF 的回执验收。文字和 GIF 已接入桥接发送流程，普通图片验收覆盖底层 API。该发送组件暂未支持普通文件、引用和群聊真实 @ 的常规发送。[4.2 适配范围](docs/WECHAT_4_2_0_12.md)
+**0.4.5 全新安装使用微信 4.2.0.12 x64。** 升级保留已有客户端选择、账号和数据，可在连接设置中切换微信。
+
+- **原生发送（Hook）**是默认方式。4.2.0.12 已在文件传输助手验收文字、普通图片、原生动画表情和语音气泡的服务器回执。普通图片验收覆盖底层发送 API。4.2 Hook 暂未支持常规文件或引用发送，群聊真实 @ 尚未实发验收。[4.2 适配范围](docs/WECHAT_4_2_0_12.md)
+- **前台模拟输入（实验）**可在“设置 → 连接设置 → 微信发送方式”切换。安装器已内置运行依赖，使用未加载 Hook 的微信发送文字与普通文件。实验性前台录音需要 VB-CABLE，目前限微信 4.2.0.12 的文件传输助手。[前台模式设置](docs/FOREGROUND_INPUT.md)
 
 ## 快速开始
 
@@ -49,7 +54,7 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 
 ### 1. 下载并安装
 
-从 [0.4.3 Release](https://github.com/sourcepro5/WeChatAgent/releases/tag/v0.4.3) 下载 `WeChatAgent-Setup-0.4.3-x64.exe`。同页提供源码包、可选插件和 SHA-256 校验清单。
+从 [0.4.5 Release](https://github.com/sourcepro5/WeChatAgent/releases/tag/v0.4.5) 下载 `WeChatAgent-Setup-0.4.5-x64.exe`。同页可下载源码包、插件 ZIP 和 SHA-256 校验清单。
 
 运行安装器，选择安装根目录：
 
@@ -113,10 +118,13 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 | 我想做什么 | 教程 |
 | --- | --- |
 | 熟悉界面、为聊天选择人格与模式 | [界面与聊天设置](docs/UI_LAYOUT.md) |
+| 切换主题预设与主看板布局 | [主题预设](docs/THEME_PRESETS.md) |
+| 更换或切换匹配微信程序 | [微信程序与版本选择](docs/WECHAT_CLIENT_SELECTION.md) |
 | 通过微信交办任务 | [远程助手](docs/ASSISTANT_REMOTE.md) |
 | 为指定聊天分配工具与技能 | [能力授权](docs/DSH_CHAT_ACCESS.md) |
-| 接收附件、查看各微信版本的文件回传条件 | [文件收发](docs/FILE_TRANSFER.md) |
-| 把收到的微信语音转成文字 | [语音识别配置](docs/VOICE_INPUT.md) |
+| 接收附件、回传任务成果 | [文件收发](docs/FILE_TRANSFER.md) |
+| 配置转写、语音合成和音色 | [语音对话](docs/VOICE_OUTPUT.md) |
+| 使用前台模式发送文字和普通文件 | [前台模拟输入](docs/FOREGROUND_INPUT.md) |
 | 添加和管理表情 | [表情管理](docs/STICKER_MANAGER.md) |
 | 接入 dsh-meme 图库 | [图库接入](docs/DSH_MEME.md) |
 | 安装鱼的记事本 | [记事本插件](docs/FISH_NOTEBOOK.md) |
@@ -124,7 +132,16 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 | 更换安装位置、迁移数据 | [数据位置与迁移](docs/DATA_STORAGE.md) |
 
 
+## 语音设置
+
+Windows 安装器预置语音识别 API 1.6.0 和语音对话 API 1.7.0，两者默认关闭。在“能力 → 能力目录”打开插件配置。
+
+- **语音转文字**。在语音识别 API 填写服务地址、密钥和模型，允许插件运行后用内置短句测试，再为目标聊天授权语音读取。[识别配置](docs/VOICE_INPUT.md)
+- **语音回复**。在语音对话 API 中配置合成服务，选专用 TTS 或 Realtime 朗读，再试听模型与音色。使用 DSH 回复模式时，由当前聊天模型逐轮选择输出形式。需要转写时，可在插件中选择实时识别或单条识别。同一聊天只授权一个转写插件。[对话、提供商和音色设置](docs/VOICE_OUTPUT.md)
+
 ## 插件安装
+
+语音识别 API 1.6.0 和语音对话 API 1.7.0 随 0.4.5 安装器预置，可在「能力 → 能力目录」直接配置，默认关闭。
 
 ### 下载插件包
 
@@ -133,10 +150,13 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 
 | 插件 | 下载 ZIP | 使用说明 |
 | --- | --- | --- |
-| 语音识别 API | [speech-recognition-1.5.0.zip](https://github.com/sourcepro5/WeChatAgent/raw/refs/heads/main/optional-extensions/packages/speech-recognition-1.5.0.zip) | [API 配置与语音转写](docs/VOICE_INPUT.md) |
-| 鱼的记事本 | [fish-notebook-1.1.1.zip](https://github.com/sourcepro5/WeChatAgent/raw/refs/heads/main/optional-extensions/packages/fish-notebook-1.1.1.zip) | [记事本插件说明](docs/FISH_NOTEBOOK.md) |
+| 语音对话 API | [speech-synthesis-1.7.0.zip](optional-extensions/packages/speech-synthesis-1.7.0.zip) | [语音合成、实时和单条转写](docs/VOICE_OUTPUT.md) |
+| 语音识别 API | [speech-recognition-1.6.0.zip](optional-extensions/packages/speech-recognition-1.6.0.zip) | [API 配置与语音转写](docs/VOICE_INPUT.md) |
+| 鱼的记事本 | [fish-notebook-1.1.1.zip](optional-extensions/packages/fish-notebook-1.1.1.zip) | [记事本插件说明](docs/FISH_NOTEBOOK.md) |
 
 每个 ZIP 都附有同名的 `.sha256` 校验文件，位于同一目录。安装时直接导入 ZIP，无需解压。
+
+这些插件的当前版本自带页面。语音对话 API 1.7.0 需要 0.4.5 的语音宿主，独立语音识别 API 与鱼的记事本支持 0.4.3 及以上版本。旧版宿主缺少所需能力时会拒绝导入，请先升级主程序。
 
 ### 安装步骤
 
@@ -146,15 +166,14 @@ WeChatAgent 支持好友和群聊的人格对话与独立上下文。连接 Deep
 2. 安装插件。
 3. 配置参数，并选择允许使用的聊天。
 4. 启用插件。
+5. 带页面的插件在卡片上点击“打开”进入。页面在隔离环境中运行，只能读写本插件设置并调用本插件动作。
 
 安装后默认关闭。更新与卸载的数据保留规则，
 以插件说明和界面提示为准。
 
 WeChatAgent 插件与 DSH 插件分别管理，安装包不通用。
 
-安装“语音识别 API”后，从插件卡片点击“打开”，填写识别服务地址、密钥和模型。勾选“允许此插件运行”后，可用内置短句测试。授予语音读取权限、选择目标聊天并保存后，收到的微信语音会转写给当前聊天模型。[语音 API 转写](docs/VOICE_INPUT.md)
-
-维护者可运行 `npm run plugin:check` 检查插件宿主。源码与安装器构建会核对权限、能力声明及第一方 ZIP 与源码的一致性。
+插件宿主校验使用 `npm run plugin:check`。源码与安装器构建会检查权限、能力声明和第一方 ZIP 与源码的一致性。
 
 [插件开发规范](docs/PLUGIN_DEVELOPMENT.md)
 · [聊天小便签示例](examples/plugins/chat-notes/)
@@ -182,9 +201,13 @@ WeChatAgent 插件与 DSH 插件分别管理，安装包不通用。
 并从托盘完整退出、重新打开 DSH。
 进一步检查“设置 → 维护 → 诊断”中的连接结果。
 
-### 更新 DSH 到 0.2.2 后，每轮都报 `turn_error` 怎么办？
+### 更新 DSH 后为什么不回复了？
 
-升级到 WeChatAgent 0.4.3，准备连接配置，从托盘完整退出并重开 DSH，再启动 WeChatAgent 服务。[连接 DSH](docs/EXTERNAL_DSH.md)
+DSH 0.2.2 调整了工具附加流程，WeChatAgent 0.4.2 及更早版本可能在对话开始时报 `turn_error`。升级到 0.4.5 后，准备连接配置，从托盘完整退出并重开 DSH，再启动 WeChatAgent 服务。
+
+### 切换微信程序时提示版本不匹配？
+
+在“设置 → 微信与 DSH”中重新选择已准备好的 Weixin.exe，程序会自动读取精确版本并核验签名与发送组件，路径和版本一起保存。只接受当前发行版已适配、组件已就绪的版本；详见 [微信程序与版本选择](docs/WECHAT_CLIENT_SELECTION.md)。
 
 ### 关闭窗口后为什么还在运行？
 

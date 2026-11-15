@@ -71,6 +71,10 @@ test('OneBot group batch reaches plugin and only RESPOND sends a OneBot action',
       if(action.action==='get_sticker_list'){
         ws.send(JSON.stringify({echo:action.echo,status:'ok',retcode:0,data:{enabled:false,stickers:[]}}));return;
       }
+      // Capability query before each turn: this fixture backend cannot send voice.
+      if(action.action==='get_voice_capability'){
+        ws.send(JSON.stringify({echo:action.echo,status:'ok',retcode:0,data:{voice:false}}));return;
+      }
       actions.push(action);
       ws.send(JSON.stringify({ echo: action.echo, status: 'ok', retcode: 0, data: { message_id: 42, receipt: 'wechat-server-id' } }));
     });

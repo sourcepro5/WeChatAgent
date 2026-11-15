@@ -100,7 +100,7 @@ function Test-ServiceReady([string]$Name,[int]$Port,[int]$ExpectedProcessId) {
     if($Name -eq 'adapter'){
         try{$health=Invoke-RestMethod -Uri ('http://127.0.0.1:'+$Port+'/status') -TimeoutSec 1}catch{return $false}
         $healthPid=0
-        if(-not [int]::TryParse([string]$health.pid,[ref]$healthPid) -or $health.project -ne 'WeChatAgent' -or $health.component -ne 'adapter' -or $health.statusVersion -ne 1 -or $health.backend -ne 'wechat-hook' -or $healthPid -ne $ExpectedProcessId -or $health.projectRoot -isnot [string]){throw ('ADAPTER_IDENTITY_MISMATCH port='+$Port+' expectedPid='+$ExpectedProcessId)}
+        if(-not [int]::TryParse([string]$health.pid,[ref]$healthPid) -or $health.project -ne 'WeChatAgent' -or $health.component -ne 'adapter' -or $health.statusVersion -ne 1 -or $health.backend -notin @('wechat-hook','wechat-input','wechat-helper') -or ($script:expectedSender -and $health.backend -ne $script:expectedSender) -or $healthPid -ne $ExpectedProcessId -or $health.projectRoot -isnot [string]){throw ('ADAPTER_IDENTITY_MISMATCH port='+$Port+' expectedPid='+$ExpectedProcessId)}
         $sameRoot=$false;try{$sameRoot=[IO.Path]::GetFullPath($health.projectRoot).TrimEnd('\','/') -eq [IO.Path]::GetFullPath($root).TrimEnd('\','/')}catch{}
         if(-not $sameRoot){throw ('ADAPTER_IDENTITY_MISMATCH port='+$Port+' expectedPid='+$ExpectedProcessId)}
         return $health.ready -eq $true
@@ -140,7 +140,9 @@ function Start-ServiceProcess([string]$Name,[string]$Exe,[string]$Arguments,[str
 }
 function Show-Status($Config) {
     $hookSender = $Config.runtime.sender -eq 'wechat-hook'
-    Write-Output 'Sender: wechat-hook (native HTTP)'
+    $inputSender = $Config.runtime.sender -eq 'wechat-input'
+    $helperSender = $Config.runtime.sender -eq 'wechat-helper'
+    Write-Output ($(if ($inputSender) { 'Sender: wechat-input (foreground keyboard, no OCR)' } elseif ($helperSender) { 'Sender: wechat-helper (Helper text and voice, experimental)' } else { 'Sender: wechat-hook (native HTTP)' }))
     foreach ($property in $Config.ports.PSObject.Properties) { Write-Output ($property.Name + ': ' + (Test-Port ([int]$property.Value))) }
     $wechatRunning = [bool](Get-Process Weixin,WeChat -ErrorAction SilentlyContinue)
     Write-Output ('WeChat desktop running: ' + $wechatRunning)
@@ -172,6 +174,18 @@ function Show-Status($Config) {
             Write-Output ('Hook version: '+$status.version)
             if ($status.last_error) { Write-Output ('Hook last error: '+$status.last_error) }
         }
+        if ($helperSender) {
+            Write-Output ('Helper connected: '+$status.sender_connected)
+            Write-Output ('Helper text send: '+$status.native_text_send)
+            Write-Output ('Helper voice send: '+$status.native_voice_send)
+            if ($status.last_error) { Write-Output ('Helper last error: '+$status.last_error) }
+        }
+        if ($inputSender) {
+            Write-Output ('Input sender connected: '+$status.sender_connected)
+            Write-Output ('Input account verified: '+$status.sender_account_verified)
+            Write-Output ('Input paused: '+$status.paused)
+            if ($status.last_error) { Write-Output ('Input last error: '+$status.last_error) }
+        }
     }
     Write-Output ('Logs: '+(Join-Path $stateDir 'logs'))
 }
@@ -180,7 +194,10 @@ $node = (Get-Command node -ErrorAction Stop).Source
 & $node (Join-Path $PSScriptRoot 'project-config.mjs')
 if ($LASTEXITCODE -ne 0) { throw 'Invalid project configuration.' }
 $config = Get-Content (Join-Path $root 'config\wechatagent.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$script:expectedSender = $config.runtime.sender
 $hookSender = $config.runtime.sender -eq 'wechat-hook'
+$inputSender = $config.runtime.sender -eq 'wechat-input'
+$helperSender = $config.runtime.sender -eq 'wechat-helper'
 if ($Action -eq 'prepare') { exit 0 }
 if ($Action -eq 'status') { Show-Status $config; exit 0 }
 if ($Action -eq 'restart') { Stop-Services }
@@ -220,6 +237,14 @@ try {
     if ($sync.ExitCode -ne 0) {
         $detail = (Get-Content (Join-Path $stateDir 'logs\sync.stderr.log') -Raw).Trim()
         throw ('WeFlow account/API verification failed: ' + $detail + '. Open WeFlow settings; details: state/logs/sync.stderr.log')
+    }
+    if ($helperSender) {
+        & $node (Join-Path $PSScriptRoot 'hook-onebot.mjs') --check
+        if ($LASTEXITCODE -ne 0) { throw 'HELPER_SENDER_NOT_READY: Start Helper with the wechatagent_voice plugin (token_file state/helper-voice.token), connect the selected WeChat 4.2.0.12 account, then start again. Helper must report both text and voice sending. See the error above.' }
+    }
+    if ($inputSender) {
+        & $node (Join-Path $PSScriptRoot 'hook-onebot.mjs') --check
+        if ($LASTEXITCODE -ne 0) { throw 'INPUT_SENDER_NOT_READY: Install the input sender dependencies, open the selected clean WeChat (not the Hook client), log in and keep its main window open (minimized is fine). See the error above.' }
     }
     if ($hookSender) {
         & $node (Join-Path $PSScriptRoot 'hook-onebot.mjs') --check

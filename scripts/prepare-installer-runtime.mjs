@@ -23,7 +23,9 @@ function unpack(file, target) {
 const archive = path.join(cache, 'python-3.13.16-embed-amd64.zip');
 await download('https://www.python.org/ftp/python/3.13.16/python-3.13.16-embed-amd64.zip', archive, '97dae5274cc54867065e8d5a3226e48c35017ed332a0fdb0e27d5b5821961297');
 unpack(archive, runtime);
-const packages = [['sqlcipher3','0.6.2'],['cryptography','50.0.2'],['zstandard','0.25.0'],['pycryptodome','3.23.0'],['Pillow','12.3.0'],['imageio-ffmpeg','0.6.0'],['cffi','2.0.0'],['pycparser','2.23']];
+const inputPackages = fs.readFileSync(path.join(projectRoot,'scripts/input-requirements.txt'),'utf8')
+  .trim().split(/\r?\n/).map(line=>line.split('=='));
+const packages = [['sqlcipher3','0.6.2'],['cryptography','50.0.2'],['zstandard','0.25.0'],['pycryptodome','3.23.0'],['Pillow','12.3.0'],['imageio-ffmpeg','0.6.0'],['cffi','2.0.0'],['pycparser','2.23'],...inputPackages];
 const site = path.join(runtime, 'Lib', 'site-packages'); fs.mkdirSync(site, { recursive: true });
 const locked = [];
 for (const [name, version] of packages) {
@@ -38,6 +40,6 @@ for (const [name, version] of packages) {
 }
 fs.writeFileSync(path.join(runtime, 'python313._pth'), 'python313.zip\n.\nLib/site-packages\nimport site\n');
 fs.writeFileSync(path.join(runtime, 'DEPENDENCIES.json'), JSON.stringify(locked, null, 2));
-const probe = spawnSync(path.join(runtime, 'python.exe'), ['-c', 'import sys,sqlcipher3,cryptography,zstandard,Crypto,PIL,imageio_ffmpeg; from sqlcipher3 import dbapi2; db=dbapi2.connect(":memory:"); db.execute("select 1").fetchone(); print("READER_RUNTIME_OK",sys.version.split()[0])'], { windowsHide: true, encoding: 'utf8', timeout: 30000 });
+const probe = spawnSync(path.join(runtime, 'python.exe'), ['-B','-c', 'import sys,sqlcipher3,cryptography,zstandard,Crypto,PIL,imageio_ffmpeg,psutil,win32api,win32clipboard,win32gui,win32process; from sqlcipher3 import dbapi2; db=dbapi2.connect(":memory:"); db.execute("select 1").fetchone(); print("READER_AND_INPUT_RUNTIME_OK",sys.version.split()[0])'], { windowsHide: true, encoding: 'utf8', timeout: 30000 });
 if (probe.status !== 0) throw new Error(probe.stderr || 'Bundled Python runtime failed');
 console.log(probe.stdout.trim());

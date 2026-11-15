@@ -5,16 +5,16 @@ const safeError=error=>/^[A-Z][A-Z0-9_]{2,80}$/.test(error?.code??error?.message
 export class FileDeliveryWorker {
   constructor(adapter,{log=()=>{},pollMs=1000}={}){this.adapter=adapter;this.store=new FileTransfers(adapter.directory);this.log=log;this.pollMs=pollMs;this.running=new Set();this.targets=new Set();this.stopped=false;}
   save(job){this.store.write(job);this.log('[File] '+job.id.slice(0,12)+' state='+job.state+(job.error?' code='+job.error:''));}
-  tick(){if(this.stopped||this.running.size>=2)return;for(const job of this.store.list().sort((a,b)=>a.createdAt-b.createdAt)){
+  tick(){if(this.stopped||this.running.size>=2||this.adapter.status.backend==='wechat-input'&&this.adapter.status.paused)return;for(const job of this.store.list().sort((a,b)=>a.createdAt-b.createdAt)){
     if(terminal.has(job.state)||this.running.has(job.id)||this.targets.has(job.key)||this.running.size>=2)continue;
-    this.running.add(job.id);this.targets.add(job.key);void this.run(job).catch(error=>{job.state=job.state==='queued'?'failed':'unconfirmed';job.error=safeError(error);try{this.save(job);}catch{}}).finally(()=>{this.running.delete(job.id);this.targets.delete(job.key);});
+    this.running.add(job.id);this.targets.add(job.key);void this.run(job).catch(error=>{if(job.state==='queued'&&(error.code??error.message)==='INPUT_PAUSED')return;job.state=job.state==='queued'?'failed':'unconfirmed';job.error=safeError(error);try{this.save(job);}catch{}}).finally(()=>{this.running.delete(job.id);this.targets.delete(job.key);});
   }}
   async run(job){
     const adapter=this.adapter;
     if(job.accountScope!==this.store.account()||!this.store.allowed(job.key,job.sender)){job.state='cancelled';job.error='FILE_ACCESS_CHANGED';this.save(job);return;}
     if(Date.now()>=job.deadlineAt){job.state=job.state==='queued'?'expired':'unconfirmed';job.error='FILE_DELIVERY_TIMEOUT';this.save(job);return;}
     const [,kind,target]=job.key.split(':');if(!['private','group'].includes(kind)||!/^\d+$/.test(target))throw Error('FILE_JOB_INVALID');
-    const identity=await adapter.checkNative();if(adapter.status.native_file_send!==true)throw Error('FILE_NATIVE_SENDER_NOT_READY');const wxid=await adapter.resolveTarget(kind,target);
+    const identity=await adapter.checkNative();if(adapter.status.backend==='wechat-input'&&adapter.status.paused)throw Error('INPUT_PAUSED');if((adapter.status.file_send??adapter.status.native_file_send)!==true)throw Error('FILE_NATIVE_SENDER_NOT_READY');const wxid=await adapter.resolveTarget(kind,target);
     if(job.wxid&&job.wxid!==wxid||job.account&&job.account!==identity.account)throw Error('FILE_ACCOUNT_CHANGED');
     if(job.state==='queued'){
       const source=this.store.staged(job),proof=await this.store.hash(source,AbortSignal.timeout(10000));if(proof.sha256!==job.sha256||proof.md5!==job.md5||proof.size!==job.size)throw Error('FILE_STAGED_INVALID');

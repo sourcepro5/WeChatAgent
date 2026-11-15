@@ -14,7 +14,7 @@ test('an ignored file in the plugin source cannot slip into the approved ZIP exc
 test('the voice ZIP has its own exact first-party identity and cannot impersonate a different package',t=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'voice-source-audit-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
  fs.cpSync(path.resolve('optional-extensions/speech-recognition'),path.join(root,'optional-extensions/speech-recognition'),{recursive:true});
- const relative='optional-extensions/packages/speech-recognition-1.5.0.zip';assert(SOURCE_PLUGIN_ZIPS.includes(relative));
+ const relative='optional-extensions/packages/speech-recognition-1.6.0.zip';assert(SOURCE_PLUGIN_ZIPS.includes(relative));
  const zip=packZip(packageFiles(path.join(root,'optional-extensions/speech-recognition')));assert.equal(verifySourcePluginZip(root,zip,relative).id,'speech-recognition');
  assert.throws(()=>verifySourcePluginZip(root,zip,'optional-extensions/packages/not-reviewed.zip'),/NOT_APPROVED/);
  const item=JSON.parse(fs.readFileSync(path.join(root,'optional-extensions/speech-recognition/plugin.json')));item.id='other-plugin';fs.writeFileSync(path.join(root,'optional-extensions/speech-recognition/plugin.json'),JSON.stringify(item));

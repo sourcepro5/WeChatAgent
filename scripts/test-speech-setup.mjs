@@ -51,8 +51,10 @@ const pluginRoot=new URL('../optional-extensions/speech-recognition/',import.met
 const page=fs.readFileSync(new URL('ui/settings.js',pluginRoot),'utf8'),schema=JSON.parse(fs.readFileSync(new URL('plugin.json',pluginRoot))).configSchema;
 test('the package settings page declares only its settings actions and reaches the host solely through the SDK',()=>{
   assert.deepEqual(JSON.parse(fs.readFileSync(new URL('ui.json',pluginRoot))).settings.actions,['models','check','validate']);
-  assert.deepEqual([...page.matchAll(/^import .* from '([^']+)';$/gm)].map(match=>match[1]),['./__sdk.mjs']);
-  for(const forbidden of [/\bfetch\(/,/XMLHttpRequest/,/WebSocket/,/localStorage/,/innerHTML/,/postMessage/])assert(!forbidden.test(page),String(forbidden));
+  assert.deepEqual([...page.matchAll(/^import .* from '([^']+)';$/gm)].map(match=>match[1]),['./__sdk.mjs','./helpers.mjs']);
+  const helper=fs.readFileSync(new URL('ui/helpers.mjs',pluginRoot),'utf8');
+  assert(!/^import\s/m.test(helper));
+  for(const forbidden of [/\bfetch\(/,/XMLHttpRequest/,/WebSocket/,/localStorage/,/innerHTML/,/postMessage/])assert(!forbidden.test(page+'\n'+helper),String(forbidden));
   assert.deepEqual([...page.matchAll(/wa\.actions\.call\('([a-z-]+)'/g)].map(match=>match[1]).sort(),['validate']);
   assert.deepEqual([...page.matchAll(/run\('([a-z-]+)'\)/g)].map(match=>match[1]).sort(),['check','models','models','models','models']);
   // Only the explicit button uploads the bundled sample; automatic refreshes read models.

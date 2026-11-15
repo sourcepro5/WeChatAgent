@@ -10,6 +10,7 @@
 | scripts/wechat_sticker.py | 本项目新增绑定和下载逻辑；缓存布局及 CBC 约定参考同一 MIT 上游，保留来源说明 |
 | packages/voice-codec/silk-wasm | [idranme/silk-wasm](https://github.com/idranme/silk-wasm)，固定 npm 3.7.1 最小运行载荷；MIT，保留 LICENSE、版本来源和逐文件 SHA-256（PROVENANCE.json） |
 | imageio-ffmpeg | 独立安装的 Python 包，BSD-2-Clause；其 FFmpeg 程序按构建自带许可使用，本源码副本不分发二进制，见 [包元数据](https://pypi.org/project/imageio-ffmpeg/0.6.0/) |
+| 前台模拟输入依赖 | Windows 安装包随内置 Python 提供 [psutil 7.2.2](https://pypi.org/project/psutil/7.2.2/) 与 [pywin32 312](https://pypi.org/project/pywin32/312/)，保留原许可证文件与轮子哈希 |
 | 有权独立授权的本项目新增代码、桌面界面及已授权人格预设 | 依根目录许可的适用范围，不扩大到维护者无权授权的内容 |
 | 安装时获取的 SDK 和 Python 包 | 各自原许可与依赖声明；副本不包含 node_modules 或解释器环境 |
 

@@ -1,0 +1,12 @@
+{
+  "api": "v1",
+  "description": "WeChatAgent 本机后台文字与语音入口（授权聊天）",
+  "message_types": [
+    34
+  ],
+  "requires": [
+    "text.send",
+    "voice.send"
+  ],
+  "default_enabled": false
+}

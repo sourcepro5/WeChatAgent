@@ -1,7 +1,7 @@
 // Pure shared data: installer, runtime, worker, DSH health and console UI use it.
 export const API_VERSION = 2;
 export const HOST_RUNTIME = 'isolated-v2';
-export const CONTRACT_REVISION = 'wechatagent-plugin-v2.2';
+export const CONTRACT_REVISION = 'wechatagent-plugin-v2.4';
 export const PERMISSION_LABELS = Object.freeze({
   storage: '保存插件数据',
   history_read: '读取当前聊天历史',
@@ -12,6 +12,7 @@ export const PERMISSION_LABELS = Object.freeze({
   model_generate: '独立调用当前模型（会产生消耗）',
   schedule: '按设置的每日时间执行',
   audio_read: '读取当前微信语音（语音识别插件会上传至所配置的 API）',
+  audio_synthesize: '使用已配置的语音服务生成微信语音',
 });
 export const PERMISSIONS = Object.freeze(Object.keys(PERMISSION_LABELS));
 export const FEATURE_LABELS = Object.freeze({
@@ -21,12 +22,15 @@ export const FEATURE_LABELS = Object.freeze({
   'model-utility-v1': '独立模型生成',
   'daily-schedule-v1': '每日计划',
   'voice-input-v1': '微信语音输入',
+  'voice-output-v1': '微信语音合成',
+  'voice-dialogue-v1': '微信语音对话',
   'diary-question-v1': '微信日记询问',
 });
 export const HOST_FEATURES = Object.freeze(Object.keys(FEATURE_LABELS));
 export const PERMISSION_FEATURES = Object.freeze({
   documents: 'documents-v1', persona_read: 'persona-read-v1',
   model_generate: 'model-utility-v1', schedule: 'daily-schedule-v1', audio_read: 'voice-input-v1',
+  audio_synthesize: 'voice-output-v1',
 });
 export const HOOKS = Object.freeze(['before-context', 'after-response']);
 // Host features that hand one kind of incoming chat event to one plugin action.
@@ -34,11 +38,32 @@ export const HOOKS = Object.freeze(['before-context', 'after-response']);
 // and registering the action; the host never routes these by plugin id.
 export const FEATURE_ENTRIES = Object.freeze({
   'voice-input-v1': Object.freeze({action: 'transcribe', permission: 'audio_read'}),
+  'voice-output-v1': Object.freeze({action: 'synthesize', permission: 'audio_synthesize'}),
+  'voice-dialogue-v1': Object.freeze({action: 'converse', permission: 'audio_synthesize'}),
   'diary-question-v1': Object.freeze({action: 'ask', permission: 'reply'}),
 });
 
 export function requiredHostFeatures(item) {
   return [...new Set([...(item.requiresHostFeatures ?? []), ...(item.permissions ?? []).map(name => PERMISSION_FEATURES[name]).filter(Boolean), ...(item.schedule ? ['daily-schedule-v1'] : [])])];
+}
+
+export function adapterOwnsPlugin(item) {
+  const required = requiredHostFeatures(item);
+  return required.includes('voice-output-v1') && required.every(feature => ['voice-output-v1', 'actions-v1'].includes(feature)) &&
+    item.permissions?.length === 1 && item.permissions[0] === 'audio_synthesize';
+}
+
+export function featureConfigured(item, saved, feature) {
+  if (!item.requiresHostFeatures?.includes(feature)) return false;
+  if (!item.requiresHostFeatures.includes('voice-dialogue-v1')) return true;
+  const settings = {...item.settings, ...saved?.settings};
+  if (feature === 'voice-dialogue-v1') {
+    return settings.voiceMode === 'realtime' && item.permissions.includes('audio_read');
+  }
+  if (feature === 'voice-input-v1') {
+    return settings.voiceMode !== 'realtime' && typeof settings.recognitionModel === 'string' && !!settings.recognitionModel.trim();
+  }
+  return true;
 }
 
 export function hostContract() {
@@ -51,6 +76,11 @@ export function contractFingerprint(contract = hostContract()) {
 
 export function hostCompatibility(item, live) {
   const required = requiredHostFeatures(item);
+  if (adapterOwnsPlugin(item) || required.includes('voice-dialogue-v1') &&
+      required.every(feature => ['actions-v1', 'voice-input-v1', 'voice-output-v1', 'voice-dialogue-v1'].includes(feature)) &&
+      item.permissions?.every(permission => ['audio_read', 'audio_synthesize'].includes(permission))) {
+    return {compatible: true, reason: '由微信语音适配器加载。', missingFeatures: [], missingPermissions: []};
+  }
   if (!live) return {compatible: false, reason: 'DSH 插件宿主未连接，请连接后再启用。', missingFeatures: required, missingPermissions: []};
   const version = live.apiVersion ?? live.pluginApiVersion ?? live.extensionApiVersion;
   const runtime = live.runtime ?? live.pluginRuntime;

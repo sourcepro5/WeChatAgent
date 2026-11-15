@@ -6,15 +6,16 @@ import {safeFetch} from '../../components/qq-bridge/src/safe-fetch.js';
 import {PluginDocuments} from './documents.mjs';
 import {createAudioReader} from './audio.mjs';
 import {boundedTask} from '../dsh-social-bridge-plugin/deadline.mjs';
-import {FEATURE_ENTRIES} from './contract.mjs';
+import {FEATURE_ENTRIES,adapterOwnsPlugin,featureConfigured} from './contract.mjs';
 export {createPluginModelUtility} from './model-utility.mjs';
 export const TOOL_POLICY=Symbol.for('wechatagent.extension-tools.v1');
 
 const text=value=>String(value??'').slice(0,12000);
 export class PluginRuntime{
-  constructor({root,accountScope='unbound',isAllowed=()=>true,historyFor=()=>[],rowsForDate=()=>[],personaFor=()=>{throw fail('PLUGIN_PERSONA_UNAVAILABLE');},generateText,readAudio,isBusy=()=>false,canSchedule=()=>true,now=Date.now,log=()=>{},fetchText=safeFetch,toolTimeoutMs=8000}){
+  constructor({root,accountScope='unbound',isAllowed=()=>true,historyFor=()=>[],rowsForDate=()=>[],personaFor=()=>{throw fail('PLUGIN_PERSONA_UNAVAILABLE');},generateText,readAudio,isBusy=()=>false,canSchedule=()=>true,now=Date.now,log=()=>{},fetchText=safeFetch,toolTimeoutMs=8000,onlyFeatures=[]}){
     this.root=path.resolve(root);this.accountScope=hash(accountScope);this.isAllowed=isAllowed;this.historyFor=historyFor;this.log=log;this.fetchText=fetchText;
     this.records=new Map();this.dirty=true;this.revision='';this.closed=false;
+    this.onlyFeatures=onlyFeatures;
     this.readAudio=readAudio??createAudioReader(root);
     this.accountBound=accountScope!=='unbound'&&!!accountScope;this.accountId=/^[a-f0-9]{64}$/.test(accountScope)?accountScope:hash(accountScope);Object.assign(this,{rowsForDate,personaFor,generateText,isBusy,canSchedule,now});this.utilityCalls=0;this.scheduleRetry=new Map();
     this.toolTimeoutMs=Math.max(20,Math.min(8000,toolTimeoutMs));
@@ -37,7 +38,10 @@ export class PluginRuntime{
   async reconcile(){
     const saved=this.policy(),changed=saved.revision!==this.revision;
     if(!this.dirty&&!changed)return;
-    const catalog=this.dirty||changed||!this.catalog?scanPlugins(this.root):this.catalog;this.catalog=catalog;this.dirty=false;this.revision=saved.revision;
+    const catalog=scanPlugins(this.root).filter(item=>this.onlyFeatures.length
+      ? this.onlyFeatures.some(feature=>item.requiresHostFeatures?.includes(feature))
+      : !adapterOwnsPlugin(item));
+    this.catalog=catalog;this.dirty=false;this.revision=saved.revision;
     for(const [id,record]of this.records){
       const next=catalog.find(item=>item.id===id),setting=saved.config.plugins[id];
       if(!next||next.revision!==record.revision||record.generation!==setting?.generation||!setting?.enabled){await record.process?.dispose();this.records.delete(id);}
@@ -66,7 +70,7 @@ export class PluginRuntime{
   service(record,turn,signal,readOnly=false){
     const check=permission=>{if(signal.aborted||!this.active(record,turn.conversationKey,permission))throw fail('PLUGIN_PERMISSION_DENIED');};
     return async(method,args)=>{
-      const limit=method.startsWith('documents.')?1100000:method==='model.generate'?128*1024:64*1024;
+      const limit=method.startsWith('documents.')?1100000:method==='model.generate'?128*1024:method==='audio.write'?384*1024:64*1024;
       if(!Array.isArray(args)||Buffer.byteLength(JSON.stringify(args))>limit)throw fail('PLUGIN_SERVICE_ARGUMENT_INVALID');
       if(method==='audio.read'){
         check('audio_read');if(readOnly)throw fail('PLUGIN_HOOK_READ_ONLY');
@@ -74,6 +78,13 @@ export class PluginRuntime{
         if(!this.accountBound||!turn.voiceIds?.includes(id)||!options||Object.keys(options).some(key=>key!=='format')||!['wav','silk'].includes(options.format??'wav'))throw fail('VOICE_REFERENCE_NOT_ALLOWED');
         const result=await this.readAudio(id,turn.conversationKey,record.id,{...options,signal});
         check('audio_read');return result;
+      }
+      if(method==='audio.write'){
+        check('audio_synthesize');
+        if(readOnly||!this.accountBound||typeof turn.writeVoice!=='function')throw fail('PLUGIN_SERVICE_UNAVAILABLE');
+        if(args.length!==1||typeof args[0]!=='string')throw fail('PLUGIN_SERVICE_ARGUMENT_INVALID');
+        turn.writeVoice(args[0]);
+        return {ok:true};
       }
       if(method.startsWith('documents.')){
         check('documents');const documents=new PluginDocuments(this.root,this.accountScope,this.accountId,record);
@@ -163,6 +174,7 @@ export class PluginRuntime{
   async invokeAction(id,name,args,turn,{signal,timeoutMs=35000,requireReply=false}={}){
     if(!allowedChat(this.root,turn.conversationKey))throw fail('PLUGIN_CHAT_UNAVAILABLE');await this.sync();const record=this.records.get(id);
     if(!record||!this.active(record,turn.conversationKey))return {handled:false};
+    if(['voice-output-v1','voice-dialogue-v1'].some(feature=>name===FEATURE_ENTRIES[feature].action&&record.requiresHostFeatures.includes(feature)))throw fail('PLUGIN_ACTION_UNAVAILABLE');
     const action=record.process.actions.find(action=>action.id===name);if(!action)throw fail('PLUGIN_ACTION_UNAVAILABLE');validateValue(args,action.parameters);
     return this.invoke(record,'action',name,args,turn,{signal,timeoutMs,requireReply});
   }
@@ -170,10 +182,12 @@ export class PluginRuntime{
   // feature, hold its permission and register its action.
   featureHandlers(feature,key){
     const entry=FEATURE_ENTRIES[feature];if(!entry)return [];
-    return [...this.records.values()].filter(record=>this.active(record,key,entry.permission)&&record.requiresHostFeatures?.includes(feature)&&record.process.actions?.some(action=>action.id===entry.action)).sort((a,b)=>a.id.localeCompare(b.id));
+    const saved=this.policy().config.plugins;
+    return [...this.records.values()].filter(record=>this.active(record,key,entry.permission)&&featureConfigured(record,saved[record.id],feature)&&record.process.actions?.some(action=>action.id===entry.action)).sort((a,b)=>a.id.localeCompare(b.id));
   }
   async invokeFeature(feature,args,turn,options={}){
     const entry=FEATURE_ENTRIES[feature];if(!entry)throw fail('PLUGIN_FEATURE_UNAVAILABLE');
+    if(['voice-output-v1','voice-dialogue-v1'].includes(feature)&&typeof turn.writeVoice!=='function')throw fail('PLUGIN_SERVICE_UNAVAILABLE');
     if(!allowedChat(this.root,turn.conversationKey))throw fail('PLUGIN_CHAT_UNAVAILABLE');await this.sync();
     const handlers=this.featureHandlers(feature,turn.conversationKey);
     if(!handlers.length)return {handled:false};

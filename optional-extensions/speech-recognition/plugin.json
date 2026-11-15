@@ -1,11 +1,11 @@
 {
   "id": "speech-recognition",
   "name": "语音识别 API",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "apiVersion": 2,
   "host": "wechatagent",
   "author": "WeChatAgent",
-  "description": "按公共协议连接语音服务：填写服务地址、密钥和模型 ID，无需逐个适配模型。支持文件转写、Chat 音频及已有自定义请求。",
+  "description": "把微信语音转成文字：选择平台、粘贴密钥、点测试即可。内置硅基流动、阿里云百炼、OpenAI、Groq 和本机服务预设，也支持其他 OpenAI 兼容平台和自定义请求。",
   "permissions": [
     "audio_read"
   ],
@@ -43,7 +43,7 @@
   "configSchema": {
     "apiProtocol": {
       "type": "string",
-      "title": "API 协议（通常保留 auto）",
+      "title": "请求协议（选择平台后自动设置）",
       "description": "auto 根据地址识别：基础地址默认文件转写，/chat/completions 使用 Chat 音频。也可按平台文档明确选协议；模型名不参与判断，旧自定义请求保留。",
       "enum": [
         "auto",

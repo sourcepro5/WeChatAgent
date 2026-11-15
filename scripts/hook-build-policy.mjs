@@ -17,6 +17,7 @@ export function verifyHookBuild(directory,version='4.1.10.27') {
   if(version==='4.2.0.12'){
     if(build.targetVersion!==version||build.integration!=='WeChatAgent-1'||build.profile!=='4.2.0.12-stickers-v2'||build.nativeTextSend!==true||build.nativeImageSend!==true||build.nativeMentionSend!==true||build.nativeStickerSend!==true)throw new Error('4.2 Hook build profile mismatch.');
     if(build.productionEnabled!==true||build.runtimeVerified!==true||build.acceptance?.coldStart!==true||build.acceptance?.textReceipt!==true||build.acceptance?.imageReceipt!==true||build.acceptance?.stickerReceipt!==true||build.acceptance?.animatedSticker!==true)throw new Error('4.2 runtime acceptance is required before packaging.');
+    if(build.nativeVoiceSend===true&&(build.nativeVoiceProtocol!=='silk-receipt-v1'||build.acceptance?.voiceReceipt!==true))throw new Error('4.2 voice receipt acceptance is required before packaging.');
     for(const [file,expected]of [[`wechatagent-text-${version}.dll`,build.sha256],['wechatagent-text-loader.exe',build.loaderSha256]]){
       if(crypto.createHash('sha256').update(fs.readFileSync(path.join(directory,file))).digest('hex')!==expected)throw new Error('4.2 native resource does not match build.json: '+file);
     }

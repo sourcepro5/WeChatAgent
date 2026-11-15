@@ -4,8 +4,9 @@ import {createPluginUI} from '../public/console/plugins.js';
 import {validateConfigUi} from './plugin-config-ui.mjs';
 import {createConsole} from './console-server.mjs';
 import {packZip,unpackZip} from '../packages/plugin-api/zip.mjs';
-import {configuration,atomicJson} from '../packages/plugin-api/catalog.mjs';
+import {configuration,atomicJson,packageFiles} from '../packages/plugin-api/catalog.mjs';
 import {writeVoiceAttempt} from '../packages/plugin-api/voice-status.mjs';
+import {waveFile} from '../optional-extensions/speech-synthesis/lib/wav.mjs';
 const esc=value=>String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
 const deferred=()=>{let resolve;const promise=new Promise(done=>resolve=done);return {promise,resolve};};
 
@@ -43,7 +44,46 @@ async function fixture(t){
  return {root,base,request,seen,endpoint:'http://127.0.0.1:'+service.address().port+'/v1',block(){block=deferred();return {observed:observed.promise,release:()=>{block.resolve();block=undefined;}};}};
 }
 async function install(f,bytes){const preview=await f.request('/api/plugins/inspect',{name:'speech.zip',zip:bytes.toString('base64')});assert.equal(preview.status,200);const result=await f.request('/api/plugins/install',{ticket:preview.body.ticket,revision:preview.body.revision,replace:!!preview.body.installedVersion});assert.equal(result.status,200);}
-const zip=()=>fs.readFileSync('optional-extensions/packages/speech-recognition-1.5.0.zip');
+const zip=()=>fs.readFileSync('optional-extensions/packages/speech-recognition-1.6.0.zip');
+
+test('Qwen enrollment accepts an ordinary recording through the settings route and returns only the voice ID, status and bound model',async t=>{
+ const f=await fixture(t);
+ const model='qwen-audio-3.1-realtime-flash',voiceId=model+'-fixture-01';
+ const packageEntries=packageFiles('optional-extensions/speech-synthesis').map(entry=>entry.name==='index.mjs'
+   ? {...entry,data:Buffer.from(entry.data.toString()+`
+globalThis.fetch = async (url, options) => {
+  if (url !== 'https://maas.qianwenaiapi.com/api/v1/services/audio/tts/customization' ||
+      options.headers.Authorization !== 'Bearer fixture-key') throw Error('unexpected request');
+  const body = JSON.parse(options.body);
+  if (body.input.action === 'create_voice' && body.input.audio.length > 128 * 1024) {
+    return Response.json({output:{voice_id:${JSON.stringify(voiceId)}}});
+  }
+  if (body.input.action === 'query_voice' && body.input.voice_id === ${JSON.stringify(voiceId)}) {
+    return Response.json({output:{status:'OK',target_model:${JSON.stringify(model)},resource_link:'private'}});
+  }
+  throw Error('unexpected payload');
+};
+`)}
+   : entry);
+ await install(f,packZip(packageEntries));
+ const catalog=(await f.request('/api/plugins')).body,item=catalog.plugins.find(row=>row.id==='speech-synthesis');
+ assert(item.ui.settings.actions.includes('clone-voice'));
+ const settings={voiceMode:'dsh-realtime',endpoint:'https://maas.qianwenaiapi.com/api-ws/v1/realtime',realtimeModel:model,apiKey:'fixture-key'};
+ const base64=waveFile(Buffer.alloc(320000)).toString('base64');
+ const action=(name,args)=>f.request('/api/plugins/speech-synthesis/settings-actions/'+name,{packageRevision:item.revision,args:{settings,...args}});
+ const before=configuration(f.root).revision;
+ const create=await action('clone-voice',{prefix:'fixture',format:'wav',base64});
+ assert.equal(create.status,200);
+ assert.deepEqual(create.body,{ok:true,voiceId});
+ const status=await action('query-voice',{voiceId});
+ assert.equal(status.status,200);
+ // The bound model is returned so the page can show it; the provider's resource link is not.
+ assert.deepEqual(status.body,{ok:true,voiceId,status:'OK',targetModel:model});
+ const oversized=await action('check',{base64});
+ assert.equal(oversized.status,413);
+ assert.equal(configuration(f.root).revision,before);
+});
+
 test('the speech package owns its settings page; settings actions use saved secrets, stop on uninstall and follow the new package',async t=>{
  const f=await fixture(t);await install(f,zip());let catalog=(await f.request('/api/plugins')).body;const original=catalog.plugins[0];
  assert.equal(original.configUi,undefined);assert.deepEqual(original.ui.settings.actions,['models','check','validate']);assert.equal(original.serviceStatus,undefined);

@@ -1,15 +1,19 @@
-// Native text/image/mention APIs for the exact 4.2.0.12 x64 profile.
+// Native message APIs for the exact 4.2.0.12 x64 profile.
 // No UIA, input simulation, desktop hooks or window activation.
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 #include <winternl.h>
 #include <bcrypt.h>
+#include <wincrypt.h>
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <vector>
@@ -277,6 +281,239 @@ void StickerCatching(const std::string& target,const std::string& file,uint64_t 
 }catch(const std::exception& e){nativeCppError=e.what();}}
 DWORD GuardSticker(const std::string* target,const std::string* file,uint64_t bytes){__try{StickerCatching(*target,*file,bytes);return 0;}__except(EXCEPTION_EXECUTE_HANDLER){return GetExceptionCode();}}
 
+constexpr size_t MaxVoiceBytes=2*1024*1024;
+constexpr size_t MaxVoiceBody=4*((MaxVoiceBytes+2)/3)+1024;
+constexpr char VoiceProtocol[]="silk-receipt-v1";
+enum class VoiceState { Queued, Running, Accepted, Rejected, Uncertain };
+using VoiceDigest=std::array<unsigned char,32>;
+
+struct VoiceOperation {
+    std::string id,accountDirectory,accountWxid,target;
+    uint32_t duration=0;
+    VoiceDigest digest{};
+    ULONGLONG created=GetTickCount64();
+    std::atomic<VoiceState> state{VoiceState::Queued};
+};
+
+std::atomic<bool> voiceFaulted{false};
+
+bool VoiceProfileMatches() {
+    auto* dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    auto* pe=reinterpret_cast<const IMAGE_NT_HEADERS64*>(base+dos->e_lfanew);
+    if(pe->FileHeader.TimeDateStamp!=VoiceCoreTimestamp)return false;
+    for(auto rva:{VoiceAppRva,VoiceSchedulerRva,VoiceEnqueueRva,VoiceContextRva,VoiceProviderRva,VoiceManagerRva,VoiceFactoryRva,VoiceSendRva}){
+        MEMORY_BASIC_INFORMATION page{};
+        if(!VirtualQuery(reinterpret_cast<void*>(base+rva),&page,sizeof(page))||
+           page.AllocationBase!=reinterpret_cast<void*>(base)||page.State!=MEM_COMMIT||
+           !(page.Protect&(PAGE_EXECUTE|PAGE_EXECUTE_READ|PAGE_EXECUTE_READWRITE|PAGE_EXECUTE_WRITECOPY)))return false;
+    }
+    std::wstring modulePath(32768,L'\0');
+    const auto length=GetModuleFileNameW(reinterpret_cast<HMODULE>(base),modulePath.data(),static_cast<DWORD>(modulePath.size()));
+    if(!length||length>=modulePath.size())return false;
+    modulePath.resize(length);
+    std::ifstream input(modulePath.c_str(),std::ios::binary|std::ios::ate);
+    if(!input||input.tellg()!=static_cast<std::streamoff>(VoiceCoreFileSize))return false;
+    input.seekg(0);
+    std::vector<unsigned char> block(1024*1024);
+    BCRYPT_ALG_HANDLE algorithm=nullptr;
+    BCRYPT_HASH_HANDLE hash=nullptr;
+    if(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0)return false;
+    bool valid=BCryptCreateHash(algorithm,&hash,nullptr,0,nullptr,0,0)>=0;
+    uint64_t total=0;
+    while(valid&&input.read(reinterpret_cast<char*>(block.data()),block.size()).gcount()>0){
+        const auto count=static_cast<ULONG>(input.gcount());
+        total+=count;
+        valid=total<=VoiceCoreFileSize&&BCryptHashData(hash,block.data(),count,0)>=0;
+    }
+    VoiceDigest digest{};
+    valid=valid&&input.eof()&&!input.bad()&&total==VoiceCoreFileSize&&
+          BCryptFinishHash(hash,digest.data(),static_cast<ULONG>(digest.size()),0)>=0&&
+          !memcmp(digest.data(),VoiceCoreSha256,digest.size());
+    if(hash)BCryptDestroyHash(hash);
+    BCryptCloseAlgorithmProvider(algorithm,0);
+    return valid;
+}
+
+bool VoiceOperationId(const std::string& id) {
+    static const std::regex pattern("^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$");
+    return id.size()==36&&std::regex_match(id,pattern);
+}
+
+bool VoiceUsername(const std::string& value) {
+    return !value.empty()&&value.size()<128&&
+           value.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@-")==std::string::npos;
+}
+
+std::string VoiceSilk(const json& body,VoiceOperation& operation) {
+    operation.id=body.at("operationId").get<std::string>();
+    operation.target=body.at("wxidorgid").get<std::string>();
+    operation.accountWxid=body.at("accountWxid").get<std::string>();
+    const auto& duration=body.at("durationMs");
+    if(!VoiceOperationId(operation.id)||!VoiceUsername(operation.target)||!VoiceUsername(operation.accountWxid)||
+       operation.accountWxid.find('@')!=std::string::npos||!duration.is_number_integer()||duration<=0||duration>60000)
+        throw std::invalid_argument("invalid voice operation");
+    operation.duration=duration.get<uint32_t>();
+    const auto& encoded=body.at("silkBase64").get_ref<const std::string&>();
+    if(encoded.empty()||encoded.size()>MaxVoiceBody-1024||encoded.size()%4||
+       encoded.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")!=std::string::npos)
+        throw std::invalid_argument("invalid voice encoding");
+    DWORD bytes=static_cast<DWORD>(encoded.size()/4*3);
+    std::string silk(bytes,'\0');
+    if(!CryptStringToBinaryA(encoded.data(),static_cast<DWORD>(encoded.size()),CRYPT_STRING_BASE64|CRYPT_STRING_STRICT,
+                            reinterpret_cast<BYTE*>(silk.data()),&bytes,nullptr,nullptr)||bytes<=12||bytes>MaxVoiceBytes)
+        throw std::invalid_argument("invalid voice encoding");
+    silk.resize(bytes);
+    if(silk.compare(0,10,"\x02#!SILK_V3"))throw std::invalid_argument("Tencent SILK required");
+    size_t offset=10;
+    uint32_t packets=0;
+    while(offset<silk.size()){
+        if(silk.size()-offset<2)throw std::invalid_argument("invalid SILK frame");
+        const auto* frame=reinterpret_cast<const unsigned char*>(silk.data()+offset);
+        const size_t count=frame[0]|(frame[1]<<8);
+        offset+=2;
+        if(!count||count>32767||count>silk.size()-offset)throw std::invalid_argument("invalid SILK frame");
+        offset+=count;
+        ++packets;
+    }
+    if(packets*20!=operation.duration)throw std::invalid_argument("SILK duration mismatch");
+    if(BCryptHash(BCRYPT_SHA256_ALG_HANDLE,nullptr,0,reinterpret_cast<PUCHAR>(silk.data()),bytes,
+                  operation.digest.data(),static_cast<ULONG>(operation.digest.size()))<0)
+        throw std::runtime_error("voice digest failed");
+    return silk;
+}
+
+// The task and message factory use the core's MSVC x64 ABI.
+struct VoiceShared { void* object=nullptr; uintptr_t control=0; };
+struct VoiceString { union { char small[16]; const char* large; }; size_t size,capacity; };
+struct VoiceOptions { uint32_t mode=4,codec=3; uint64_t timeout=30000,reserved[4]{},capacity=15; };
+struct VoiceResult { uint64_t status; VoiceString error; VoiceShared detail; unsigned char padding[72]; };
+static_assert(sizeof(VoiceString)==32&&sizeof(VoiceOptions)==56&&sizeof(VoiceResult)==128);
+static_assert(offsetof(VoiceResult,detail)==40&&sizeof(std::function<void()>)==64);
+
+VoiceString BorrowVoiceString(const std::string& value) {
+    VoiceString view{};
+    view.size=value.size();
+    view.capacity=value.size();
+    if(value.size()<sizeof(view.small)){
+        view.capacity=sizeof(view.small)-1;
+        memcpy(view.small,value.c_str(),value.size()+1);
+    }else view.large=value.data();
+    return view;
+}
+
+bool VoiceAccountMatches(const VoiceShared& context,const std::string& account) {
+    const auto root=Word(reinterpret_cast<void*>(base+VoiceAccountRoot),0);
+    if(!root||!context.object||!context.control)return false;
+    auto* app=reinterpret_cast<void*>(root);
+    if(Word(app,0)!=base+VoiceAccountRootTable||Word(context.object,0)!=base+VoiceContextTable||
+       Word(app,0x68)!=reinterpret_cast<uintptr_t>(context.object))return false;
+    const auto* name=reinterpret_cast<const VoiceString*>(static_cast<const BYTE*>(context.object)+0x48);
+    if(name->size!=account.size()||name->capacity<name->size||name->capacity>1024*1024)return false;
+    const auto* data=name->capacity<16?name->small:name->large;
+    return data&&!memcmp(data,account.data(),account.size())&&
+           Word(reinterpret_cast<void*>(base+VoiceAccountRoot),0)==root&&
+           Word(app,0x68)==reinterpret_cast<uintptr_t>(context.object);
+}
+
+bool ReleaseVoiceShared(const VoiceShared& value) {
+    __try{ReleaseShared(value.control);return true;}
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool ReleaseVoiceError(const VoiceString& error) {
+    __try{
+        if(error.capacity<16)return true;
+        if(error.capacity>=1024*1024||!error.large)return false;
+        auto* allocation=const_cast<char*>(error.large);
+        auto size=error.capacity+1;
+        if(size>=4096){allocation=reinterpret_cast<char**>(allocation)[-1];size+=39;}
+        Delete(allocation,size);
+        return true;
+    }__except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+VoiceState SendVoiceOnCore(const VoiceOperation& operation,const std::string& silk) {
+    using Context=VoiceShared*(__fastcall*)(VoiceShared*);
+    using Service=VoiceShared*(__fastcall*)(void*,VoiceShared*);
+    using Create=VoiceShared*(__fastcall*)(VoiceShared*,const VoiceString*,const VoiceString*,const uint32_t*,const VoiceOptions*);
+    using SubmitVoice=void*(__fastcall*)(void*,VoiceResult*,VoiceShared*,uint8_t);
+    VoiceShared context{},provider{},manager{},message{};
+    alignas(16) VoiceResult result{};
+    const auto target=BorrowVoiceString(operation.target),audio=BorrowVoiceString(silk);
+    const VoiceOptions options{};
+    auto state=VoiceState::Rejected;
+    __try{
+        reinterpret_cast<Context>(base+VoiceContextRva)(&context);
+        if(!VoiceAccountMatches(context,operation.accountWxid))__leave;
+        reinterpret_cast<Create>(base+VoiceFactoryRva)(&message,&target,&audio,&operation.duration,&options);
+        if(!message.object||!message.control||Word(message.object,0)!=base+VoiceMessageTable){
+            voiceFaulted=true;
+            __leave;
+        }
+        auto* object=static_cast<BYTE*>(message.object);
+        *reinterpret_cast<uint32_t*>(object+0x118)=34;
+        const auto* copy=reinterpret_cast<const VoiceString*>(object+0x758);
+        if(copy->size!=silk.size()||*reinterpret_cast<const uint32_t*>(object+0x778)!=operation.duration){
+            voiceFaulted=true;
+            __leave;
+        }
+        reinterpret_cast<Service>(base+VoiceProviderRva)(context.object,&provider);
+        if(!provider.object||!provider.control)__leave;
+        reinterpret_cast<Service>(base+VoiceManagerRva)(provider.object,&manager);
+        if(!manager.object||!manager.control||!VoiceAccountMatches(context,operation.accountWxid))__leave;
+        // Transfer a retained reference to the send manager. Keep the original for cleanup.
+        VoiceShared submitted=message;
+        InterlockedIncrement(reinterpret_cast<volatile LONG*>(submitted.control+8));
+        state=VoiceState::Uncertain;
+        reinterpret_cast<SubmitVoice>(base+VoiceSendRva)(manager.object,&result,&submitted,1);
+        if(result.status==0)state=VoiceState::Accepted;
+    }__except(EXCEPTION_EXECUTE_HANDLER){voiceFaulted=true;}
+    bool cleaned=ReleaseVoiceShared(result.detail);
+    cleaned=ReleaseVoiceError(result.error)&&cleaned;
+    for(const auto* value:{&message,&manager,&provider,&context})cleaned=ReleaseVoiceShared(*value)&&cleaned;
+    if(!cleaned)voiceFaulted=true;
+    return state;
+}
+
+VoiceState QueueVoice(std::function<void()>* work) {
+    struct Location { const char* function; const char* file; uint32_t line; uint32_t padding; void* caller; };
+    static_assert(sizeof(Location)==32);
+    Location location{"WeChatAgent.SendVoiceMsg","text_4_2_0_12.cpp",1,0,nullptr};
+    using App=void*(__fastcall*)();
+    using GetScheduler=VoiceShared*(__fastcall*)(void*,VoiceShared*);
+    using Enqueue=VoiceShared*(__fastcall*)(void*,VoiceShared*,Location*,std::function<void()>*,uint32_t);
+    VoiceShared scheduler{},future{};
+    auto state=VoiceState::Rejected;
+    __try{
+        auto* app=reinterpret_cast<App>(base+VoiceAppRva)();
+        if(app){
+            reinterpret_cast<GetScheduler>(base+VoiceSchedulerRva)(app,&scheduler);
+            if(scheduler.object&&scheduler.control){
+                state=VoiceState::Uncertain;
+                reinterpret_cast<Enqueue>(base+VoiceEnqueueRva)(scheduler.object,&future,&location,work,1);
+                state=VoiceState::Queued;
+            }
+        }
+    }__except(EXCEPTION_EXECUTE_HANDLER){voiceFaulted=true;}
+    const bool futureReleased=ReleaseVoiceShared(future);
+    if(!ReleaseVoiceShared(scheduler)||!futureReleased)voiceFaulted=true;
+    return state;
+}
+
+void VoiceReply(httplib::Response& res,const VoiceOperation& operation) {
+    const auto state=operation.state.load();
+    const char* name="queued";
+    switch(state){
+        case VoiceState::Accepted:name="accepted";break;
+        case VoiceState::Rejected:name="rejected";break;
+        case VoiceState::Uncertain:name="uncertain";break;
+        case VoiceState::Queued:
+        case VoiceState::Running:break;
+    }
+    res.set_content(json({{"ret",state==VoiceState::Rejected?1:0},{"state",name},
+        {"operationId",operation.id},{"target",operation.target}}).dump(),"application/json");
+}
+
 DWORD WINAPI Run(void*){
     // Resolve module paths on our reserved-stack worker, never in DllMain.
     std::vector<wchar_t> modulePath(32768);
@@ -296,19 +533,31 @@ DWORD WINAPI Run(void*){
     const auto startupFault=GuardProbe();
     if(startupFault||!nativeCppError.empty()){faulted=true;Event("construction-probe-failed");return 5;}
     probeReady=true;
-    httplib::Server server;server.new_task_queue=[](){return new ObservedPool();};server.set_payload_max_length(65536);
+    const bool voiceProfile=VoiceProfileMatches();
+    const bool voiceTestOnly=config.value("voiceTestOnly",false);
+    if(!voiceProfile)Event("voice-profile-mismatch");
+    std::map<std::string,std::shared_ptr<VoiceOperation>> voiceOperations;
+    std::weak_ptr<VoiceOperation> lastVoice;
+    httplib::Server server;server.new_task_queue=[](){return new ObservedPool();};server.set_payload_max_length(MaxVoiceBody);
     auto authorized=[token](const httplib::Request& req,httplib::Response& res){
         const std::string expected="Bearer "+token,supplied=req.get_header_value("Authorization");
         unsigned difference=static_cast<unsigned>(expected.size()^supplied.size());
         for(size_t i=0;i<expected.size();++i)difference|=expected[i]^(i<supplied.size()?supplied[i]:0);
-        if(difference){res.status=401;res.set_content("{\"error\":\"unauthorized\"}","application/json");return false;}return true;
+        if(difference){res.status=401;res.set_content("{\"error\":\"unauthorized\"}","application/json");return false;}
+        if(req.path!="/SendVoiceMsg"&&req.body.size()>65536){res.status=413;return false;}
+        return true;
     };
+    server.set_pre_routing_handler([&](const httplib::Request& req,httplib::Response& res){
+        return req.method=="POST"&&req.path=="/SendVoiceMsg"&&!authorized(req,res)
+            ?httplib::Server::HandlerResponse::Handled:httplib::Server::HandlerResponse::Unhandled;
+    });
     server.Get("/WeChatAgent/health",[&](const httplib::Request& req,httplib::Response& res){
         if(!authorized(req,res))return;
         res.set_content(json({{"backend","wechat-hook"},{"integration","WeChatAgent-1"},{"profile","4.2.0.12-stickers-v2"},{"startupState",probeReady.load()&&!faulted.load()?"ready":"failed"},{"version",Version()},
           {"pid",GetCurrentProcessId()},{"databaseAccounts",Accounts()},{"nativeTextSend",probeReady.load()&&!faulted.load()},
           {"nativeImageSend",probeReady.load()&&!faulted.load()},{"nativeMentionSend",probeReady.load()&&!faulted.load()},
           {"nativeQuoteSend",false},{"nativeStickerSend",probeReady.load()&&!faulted.load()},{"phase",phase.load()},{"faulted",faulted.load()},
+          {"nativeVoiceSend",voiceProfile&&!voiceFaulted&&!faulted},{"nativeVoiceProtocol",VoiceProtocol},{"nativeVoiceTestOnly",voiceTestOnly},
           {"diagnostics",{{"messageTableRva",actualMessageTable.load()},{"receiverLength",receiverLength.load()},
             {"receiverCapacity",receiverCapacity.load()},{"contentLength",contentLength.load()},{"contentCapacity",contentCapacity.load()}}}}).dump(),"application/json");
     });
@@ -341,6 +590,75 @@ DWORD WINAPI Run(void*){
             res.status=409;res.set_content("{\"ret\":1,\"error\":\"native backend or account not ready\"}","application/json");return false;
         }return true;
     };
+    server.Post("/SendVoiceMsg",[&](const httplib::Request& req,httplib::Response& res){
+        if(!authorized(req,res))return;
+        auto operation=std::make_shared<VoiceOperation>();
+        std::string silk;
+        try{silk=VoiceSilk(json::parse(req.body),*operation);}
+        catch(const json::exception&){res.status=400;return;}
+        catch(const std::invalid_argument&){res.status=400;return;}
+        if(voiceTestOnly&&operation->target!="filehelper"){res.status=403;return;}
+        std::lock_guard<std::mutex> lock(sendMutex);
+        if(!readyFor(req,res))return;
+        operation->accountDirectory=req.get_header_value("X-WeChatAgent-Account");
+        const auto previous=voiceOperations.find(operation->id);
+        if(previous!=voiceOperations.end()){
+            const auto& saved=*previous->second;
+            if(saved.accountDirectory!=operation->accountDirectory||saved.accountWxid!=operation->accountWxid||
+               saved.target!=operation->target||saved.duration!=operation->duration||saved.digest!=operation->digest){
+                res.status=409;
+                return;
+            }
+            VoiceReply(res,saved);
+            return;
+        }
+        if(!voiceProfile||voiceFaulted){
+            res.status=409;
+            return;
+        }
+        const auto pending=lastVoice.lock();
+        if(pending){
+            const auto state=pending->state.load();
+            if(state==VoiceState::Queued||state==VoiceState::Running){res.status=429;return;}
+        }
+        // The adapter owns the durable delivery record. Retain recent transport
+        // operations here to recover lost HTTP responses and suppress duplicates.
+        if(voiceOperations.size()>=4096){
+            for(auto it=voiceOperations.begin();it!=voiceOperations.end();){
+                if(GetTickCount64()-it->second->created>60*60*1000)it=voiceOperations.erase(it);
+                else ++it;
+            }
+            if(voiceOperations.size()>=4096){res.status=429;return;}
+        }
+        std::function<void()> send=[operation,silk=std::move(silk)](){
+            auto expected=VoiceState::Queued;
+            if(!operation->state.compare_exchange_strong(expected,VoiceState::Running)){
+                if(expected!=VoiceState::Uncertain||
+                   !operation->state.compare_exchange_strong(expected,VoiceState::Running))return;
+            }
+            operation->state=SendVoiceOnCore(*operation,silk);
+        };
+        voiceOperations.emplace(operation->id,operation);
+        lastVoice=operation;
+        const auto queued=QueueVoice(&send);
+        if(queued!=VoiceState::Queued){
+            auto expected=VoiceState::Queued;
+            operation->state.compare_exchange_strong(expected,queued);
+        }
+        VoiceReply(res,*operation);
+    });
+    server.Get(R"(/WeChatAgent/voice-deliveries/([a-f0-9-]{36}))",[&](const httplib::Request& req,httplib::Response& res){
+        if(!authorized(req,res))return;
+        std::lock_guard<std::mutex> lock(sendMutex);
+        const auto operation=voiceOperations.find(req.matches[1].str());
+        if(operation==voiceOperations.end()){res.status=404;return;}
+        if(!readyFor(req,res))return;
+        if(operation->second->accountDirectory!=req.get_header_value("X-WeChatAgent-Account")){
+            res.status=409;
+            return;
+        }
+        VoiceReply(res,*operation->second);
+    });
     server.Post("/SendImgMsg",[&](const httplib::Request& req,httplib::Response& res){
         if(!authorized(req,res))return;std::lock_guard<std::mutex> lock(sendMutex);if(!readyFor(req,res))return;
         std::string target,file;uint64_t bytes=0;

@@ -79,3 +79,89 @@ test('a legacy proactive draft containing a protocol marker is cancelled on rest
  const restored=make();restored.send=async(_target,text)=>sent.push(text);await restored.tick();await restored.tick();
  assert.deepEqual(sent,[]);assert.equal(calls,1);assert.equal(restored.state.chats[key].job,null);assert(f.buffer.contextNotices.has(key));assert.equal(f.buffer.recent(key).filter(row=>row.outgoing).length,0);
 });
+
+// ---- DSH RESPOND_VOICE: one voice message per turn, delivered by WCA ----
+import crypto from 'node:crypto';
+import {SOCIAL_VOICE_NOTICE,MAX_VOICE_REPLY_CHARS} from '../components/qq-bridge/src/core/decision-format.js';
+
+test('RESPOND_VOICE parses only when voice is offered and suitable; otherwise valid text stays text',()=>{
+ assert.deepEqual(parseSocialDecision('RESPOND_VOICE: 好的，我念给你听。',{},{allowVoice:true}),{decision:'RESPOND',mode:'voice',text:'好的，我念给你听。'});
+ assert.deepEqual(parseSocialDecision('语音回复：好的',{},{allowVoice:true}),{decision:'RESPOND',mode:'voice',text:'好的'});
+ assert.equal(parseSocialDecision('RESPOND_VOICE: 好的，我念给你听。').mode,undefined);
+ assert.equal(parseSocialDecision('RESPOND_VOICE: 好的，我念给你听。').text,'好的，我念给你听。');
+ for(const text of ['链接是 https://example.com/a','```\nls -la\n```','长'.repeat(MAX_VOICE_REPLY_CHARS+1)]){
+  const result=parseSocialDecision('RESPOND_VOICE: '+text,{},{allowVoice:true});
+  assert.equal(result.decision,'RESPOND');assert.equal(result.mode,undefined);assert(!/RESPOND_VOICE/.test(result.text));
+ }
+ assert.deepEqual(parseSocialDecision('RESPOND_VOICE: SILENT',{},{allowVoice:true}),{decision:'SILENT',text:''});
+ assert.equal(parseSocialDecision('RESPOND_VOICE: ',{},{allowVoice:true}).decision,'INVALID');
+ assert.equal(cleanReplyProtocol('RESPOND_VOICE: 你好'),'你好');
+ assert(hasReplyProtocolControl('你好\nRESPOND_VOICE: 再见'));
+ assert.deepEqual(replyDeliveryParts({decision:'RESPOND',mode:'voice',text:'你好'},'e'.repeat(64)).map(part=>part.voiceText),['你好']);
+});
+
+function voiceEngine(f,{voiceAllowed=true,sendVoice,decide,buffer=f.buffer}={}){
+ const sent=[],voiced=[],prompts=[];let calls=0;
+ const engine=new SocialEngine({buffer,batchMs:1,minIntervalMs:0,privateMinIntervalMs:0,maxPerMinute:100,maxPerTenMinutes:1000,
+  deliveryRetry:{receiptDelayMs:5,busyDelayMs:5},voiceReplyFor:async()=>voiceAllowed,
+  decide:async(_key,prompt)=>{calls++;prompts.push(prompt);return decide?decide():'RESPOND_VOICE: 我用语音回你。';},
+  sendVoice:async(target,text,options)=>{voiced.push({text,deliveryId:options.deliveryId,chat:target.conversation_id});return sendVoice?sendVoice(voiced.length):{status:'confirmed'};},
+  send:async(_target,text,options)=>{sent.push({text,deliveryId:options?.deliveryId});return{delivered:'database-confirmed'};}});
+ return {engine,sent,voiced,prompts,calls:()=>calls};
+}
+
+test('a voice turn sends exactly one voice message, no text, and a restart sends nothing more',async t=>{
+ const f=fixture(t),run=voiceEngine(f);t.after(()=>run.engine.stop());
+ run.engine.receive(message('voice-1'));await until(()=>f.buffer.unread(key).length===0&&!run.engine.running.has(key)&&run.voiced.length===1);
+ assert(run.prompts[0].includes(SOCIAL_VOICE_NOTICE));
+ assert.deepEqual(run.sent,[]);assert.equal(run.voiced[0].text,'我用语音回你。');assert.match(run.voiced[0].deliveryId,/^[a-f0-9]{64}$/);
+ assert.deepEqual(f.buffer.recent(key).filter(row=>row.outgoing).map(row=>row.text),['[语音] 我用语音回你。']);
+ run.engine.receive(message('voice-1'));await new Promise(resolve=>setTimeout(resolve,60));
+ run.engine.stop();
+ const restored=new MessageBuffer(path.join(f.dir,'messages.json')),again=voiceEngine(f,{buffer:restored});t.after(()=>again.engine.stop());
+ again.engine.replay(key);await new Promise(resolve=>setTimeout(resolve,60));
+ assert.deepEqual([run.voiced.length,run.sent.length,again.voiced.length,again.sent.length,again.calls()],[1,0,0,0,0]);
+});
+
+test('a definite synthesis failure falls back to one text message with its own delivery ID',async t=>{
+ const f=fixture(t),run=voiceEngine(f,{sendVoice:()=>({status:'rejected',fallback:true,error:'VOICE_TTS_FAILED'})});t.after(()=>run.engine.stop());
+ run.engine.receive(message('voice-2'));await until(()=>run.sent.length===1&&!run.engine.running.has(key));
+ await new Promise(resolve=>setTimeout(resolve,30));
+ assert.equal(run.voiced.length,1);assert.equal(run.sent.length,1);assert.equal(run.sent[0].text,'我用语音回你。');
+ assert.equal(run.sent[0].deliveryId,crypto.createHash('sha256').update(run.voiced[0].deliveryId+'\0voice-fallback').digest('hex'));
+ assert.deepEqual(f.buffer.recent(key).filter(row=>row.outgoing).map(row=>row.text),['我用语音回你。']);
+});
+
+test('uncertain or rejected voice deliveries are never replaced by text',async t=>{
+ for(const [label,sendVoice] of [
+  ['pending',()=>({status:'pending'})],
+  ['rejected',()=>({status:'rejected',error:'VOICE_NATIVE_REJECTED'})],
+  ['timeout',()=>{throw Error('OneBot action timeout: send_voice_text');}],
+ ]){
+  const f=fixture(t),run=voiceEngine(f,{sendVoice});t.after(()=>run.engine.stop());
+  run.engine.receive(message('voice-'+label));await until(()=>f.buffer.unread(key).length===0&&!run.engine.running.has(key)&&f.buffer.pendingReplies.size===0);
+  assert.deepEqual(run.sent,[],label);assert(run.voiced.length>=1,label);
+  assert.equal(new Set(run.voiced.map(item=>item.deliveryId)).size,1,label+' keeps one delivery ID for receipt checks');
+  if(label==='pending')assert.equal(run.voiced.length,3,'two receipt checks after the first submit');
+  else assert.equal(run.voiced.length,1,label);
+ }
+});
+
+test('a persisted submitted voice part only re-checks its receipt after restart',async t=>{
+ const f=fixture(t),msg=message('voice-restart');f.buffer.append(msg);const throughId=f.buffer.unread(key)[0].id,deliveryId='f'.repeat(64);
+ const result={decision:'RESPOND',mode:'voice',text:'重启前已提交的语音'},parts=replyDeliveryParts(result,deliveryId);parts[0].state='submitted';
+ f.buffer.rememberReply(key,{result,parts,throughId,deliveryId,message:msg,sending:true});
+ const restored=new MessageBuffer(path.join(f.dir,'messages.json')),run=voiceEngine(f,{buffer:restored});t.after(()=>run.engine.stop());
+ run.engine.replay(key);await until(()=>restored.pendingReplies.size===0&&!run.engine.running.has(key));
+ assert.equal(run.calls(),0);assert.deepEqual(run.sent,[]);assert.deepEqual(run.voiced.map(item=>[item.text,item.deliveryId]),[['重启前已提交的语音',parts[0].deliveryId]]);
+ assert.deepEqual(restored.recent(key).filter(row=>row.outgoing).map(row=>row.text),['[语音] 重启前已提交的语音']);
+});
+
+test('without a voice-capable backend the prompt has no voice notice and RESPOND_VOICE is sent as text',async t=>{
+ const f=fixture(t),run=voiceEngine(f,{voiceAllowed:false,decide:()=>'RESPOND_VOICE: 只能打字。'});t.after(()=>run.engine.stop());
+ run.engine.receive(message('voice-off'));await until(()=>run.sent.length===1&&!run.engine.running.has(key));
+ assert(!run.prompts[0].includes(SOCIAL_VOICE_NOTICE));assert.deepEqual(run.voiced,[]);assert.equal(run.sent[0].text,'只能打字。');
+ const plain=fixture(t),textRun=voiceEngine(plain,{decide:()=>'RESPOND: 普通文字回复'});t.after(()=>textRun.engine.stop());
+ textRun.engine.receive(message('text-turn'));await until(()=>textRun.sent.length===1&&!textRun.engine.running.has(key));
+ assert.deepEqual([textRun.sent[0].text,textRun.voiced.length],['普通文字回复',0]);
+});

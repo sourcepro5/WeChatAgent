@@ -4,7 +4,13 @@ import { PAT_TYPE, FORWARD_TYPE, QUOTE_TYPE, normalizeForwardedRecord, normalize
 import { stickerPolicy, cleanStickerLabel } from '../components/qq-bridge/src/core/sticker-policy.js';
 import {FileDeliveryWorker} from './file-delivery-worker.mjs';
 import { TextDeliveryStore } from './text-delivery-store.mjs';
+import { VoiceSend } from './voice-send.mjs';
+import {dialogueFeature} from './voice-synthesis.mjs';
+import {RealtimeReplies} from './realtime-reply.mjs';
+import {assistantSenderAllowed} from '../packages/dsh-social-bridge-plugin/assistant-policy.mjs';
+import {conversationMode,conversationWorkMode} from '../packages/dsh-social-bridge-plugin/conversation-policy.mjs';
 import {hookAccountProblem} from './wechat-account-check.mjs';
+import { InputSender, INPUT_BACKEND, inputAccountProblem, uniqueSearchName } from './input-sender.mjs';
 import {proactivePolicy,withinProactiveWindow,conversationSnapshot,declinedProactive} from '../components/qq-bridge/src/core/proactive-policy.js';
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -12,6 +18,27 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const HELPER_VOICE = 'wechat-helper-voice';
+// Helper as the full sender: text and native voice, with the bridge and DSH running.
+export const HELPER_BACKEND = 'wechat-helper';
+const HELPER_TEXT_BYTES = 1023;
+// Split text at character boundaries into parts of at most `limit` UTF-8 bytes,
+// preferring a line break in the second half of a part.
+export function utf8Parts(text, limit = HELPER_TEXT_BYTES) {
+  const parts = [];
+  let rest = text;
+  while (Buffer.byteLength(rest, 'utf8') > limit) {
+    const chars = [...rest];
+    let bytes = 0, cut = 0;
+    while (cut < chars.length && bytes + Buffer.byteLength(chars[cut], 'utf8') <= limit) bytes += Buffer.byteLength(chars[cut++], 'utf8');
+    const head = chars.slice(0, cut).join(''), line = head.lastIndexOf('\n');
+    const end = line > head.length / 2 ? line + 1 : head.length;
+    parts.push(head.slice(0, end));
+    rest = rest.slice(end);
+  }
+  if (rest) parts.push(rest);
+  return parts.filter(part => part.trim());
+}
 const read = file => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 export const onebotId = value => Number(crypto.createHash('sha256').update(String(value)).digest().readBigUInt64BE(0) % 2147483647n + 1n);
 export const conversationId = (wxid, name, mappedId) => {
@@ -38,10 +65,10 @@ function healthError(error,prefix,stage,endpoint){
   const reason=code==='ECONNREFUSED'?'NOT_LISTENING':error?.name==='TimeoutError'||['ETIMEDOUT','UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','ABORT_ERR'].includes(code)?'HEALTH_TIMEOUT':error instanceof SyntaxError?'HEALTH_INVALID_RESPONSE':['ECONNRESET','EPIPE','UND_ERR_SOCKET'].includes(code)?'CONNECTION_RESET':'HEALTH_FAILED';
   return startupError(prefix+'_'+reason,error,stage,port);
 }
-export function adapterStartupMessage(error,{checkOnly=false,stage='configuration',port}={}){
+export function adapterStartupMessage(error,{checkOnly=false,stage='configuration',port,sender='wechat-hook'}={}){
   const code=error instanceof AdapterError&&/^[A-Z][A-Z0-9_]{0,79}$/.test(error.message)?error.message:'ADAPTER_START_FAILED';
   const details=error?.startup??{},phase=details.stage??stage,number=details.port??(phase==='adapter-port-bind'?port:undefined),system=systemErrorCode(error);
-  return (checkOnly?'WeChat-Hook check failed: ':'Adapter startup failed: ')+code+' stage='+phase+(Number.isInteger(number)?' port='+number:'')+(system?' system='+system:'');
+  return (checkOnly?(sender===INPUT_BACKEND?'Foreground input check failed: ':'WeChat-Hook check failed: '):'Adapter startup failed: ')+code+' stage='+phase+(Number.isInteger(number)?' port='+number:'')+(system?' system='+system:'');
 }
 
 export function textSegments(message) {
@@ -57,8 +84,10 @@ export function textSegments(message) {
 }
 
 export class HookOneBot {
-  constructor({ directory = root, fetchImpl = fetch, receiptTimeoutMs, pollMs = 400 } = {}) {
+  constructor({ directory = root, fetchImpl = fetch, receiptTimeoutMs, pollMs = 400, inputSender, helperVoiceOnly = false } = {}) {
     this.directory = directory;
+    this.helperVoiceOnly = helperVoiceOnly;
+    this.inputSender = inputSender;
     this.fetch = fetchImpl;
     this.receiptOverride = receiptTimeoutMs;
     this.pollMs = pollMs;
@@ -69,6 +98,10 @@ export class HookOneBot {
     this.seen = new Map();
     this.targetsSending = new Set();
     this.textDeliveries=new TextDeliveryStore(path.join(directory,'state/text-deliveries'));
+    this.voiceSend = new VoiceSend(this);
+    this.realtime = new RealtimeReplies(this, this.voiceSend, {log: line => console.log(new Date().toISOString(), line)});
+    this.realtimeQueue = Promise.resolve();
+    this.realtimePending = 0;
     this.stickerPending = new Map();
     this.stickerStateFile=path.join(directory,'state/sticker-delivery-pending.json');
     if(fs.existsSync(this.stickerStateFile)){
@@ -79,14 +112,41 @@ export class HookOneBot {
     this.activeActions = 0;this.fileWorker=new FileDeliveryWorker(this,{log:line=>console.log(new Date().toISOString(),line)});
     this.status = { backend: 'wechat-hook', project:'WeChatAgent',component:'adapter',statusVersion:1,pid:process.pid,projectRoot:path.resolve(directory),ready:false,ob_connected: false, reader_connected: false,
       hook_connected: false, hook_account_verified: false, received: 0, confirmed_sends: 0,
-      failed_sends: 0, last_error: '', version: '' };
+      failed_sends: 0, last_error: '', version: '', native_voice_send: false };
     this.reload();
   }
   reload() {
     this.project = read(path.join(this.directory, 'config', 'wechatagent.json'));
     this.api = read(path.join(this.directory, 'state', 'wechat-io-config.json'));
     this.hook = this.project.hook;
-    if (this.project.runtime.sender !== 'wechat-hook' || !this.hook || this.project.runtime.weflowMode !== 'nt') fail('HOOK_NT_CONFIG_REQUIRED');
+    const helperBackend = !this.helperVoiceOnly && this.project.runtime.sender === HELPER_BACKEND;
+    if (this.helperVoiceOnly || helperBackend) {
+      const port = this.project.helperVoice?.port ?? 8777;
+      if (this.project.runtime.weflowMode !== 'nt' || this.hook?.expectedVersion !== '4.2.0.12' ||
+          !Number.isInteger(port) || port < 1 || port > 65535 || port === this.project.ports.adapter) {
+        fail('HELPER_VOICE_CONFIG_INVALID');
+      }
+      try { this.nativeToken = fs.readFileSync(path.join(this.directory, 'state/helper-voice.token'), 'utf8').trim(); }
+      catch (error) { if (error.code === 'ENOENT') fail('HELPER_VOICE_TOKEN_MISSING'); throw error; }
+      if (!/^[a-f0-9]{64}$/.test(this.nativeToken)) fail('HELPER_VOICE_TOKEN_MISSING');
+      this.hook = { ...this.hook, baseUrl: 'http://127.0.0.1:' + port, maxConcurrentSends: 1 };
+      const backend = helperBackend ? HELPER_BACKEND : HELPER_VOICE;
+      if (this.senderBackend && this.senderBackend !== backend) fail('SENDER_CHANGED_RESTART_REQUIRED');
+      this.senderBackend = backend;
+      this.status.backend = backend;
+      return;
+    }
+    const backend = this.project.runtime.sender;
+    if (!['wechat-hook', INPUT_BACKEND].includes(backend) || !this.hook || this.project.runtime.weflowMode !== 'nt') fail('HOOK_NT_CONFIG_REQUIRED');
+    if (this.senderBackend && this.senderBackend !== backend) fail('SENDER_CHANGED_RESTART_REQUIRED');
+    this.senderBackend = backend;
+    this.status.backend = backend;
+    if (backend === INPUT_BACKEND) {
+      // One foreground desktop: never more than one chat at a time.
+      this.hook = { ...this.hook, maxConcurrentSends: 1 };
+      this.inputSender ??= new InputSender(this.directory);
+      return;
+    }
     const url = new URL(this.hook.baseUrl);
     if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) fail('HOOK_LOOPBACK_REQUIRED');
     this.nativeToken = fs.readFileSync(path.join(this.directory, 'state', 'hook', 'native-token.txt'), 'utf8').trim();
@@ -103,7 +163,38 @@ export class HookOneBot {
     return result;
   }
   reader(route) { return this.json(this.api.reader_base_url, route, { headers: { Authorization: 'Bearer ' + this.api.reader_token } }); }
-  native(route, body, account) {
+  async native(route, body, account) {
+    // Voice-only Helper cannot send text: a definite refusal, never an uncertain submit.
+    if (this.helperVoiceOnly && route === '/SendTextMsg') throw Object.assign(new AdapterError('API_HTTP_409'), { senderCode: 'HELPER_VOICE_ONLY' });
+    if (this.helperVoiceOnly && !['/WeChatAgent/health', '/SendVoiceMsg'].includes(route) &&
+        !/^\/WeChatAgent\/voice-deliveries\/[a-f0-9-]{36}$/.test(route)) fail('HELPER_VOICE_ONLY');
+    // Helper's bridge exposes text and voice only; other media are a definite refusal.
+    if (this.senderBackend === HELPER_BACKEND && !['/WeChatAgent/health', '/SendVoiceMsg', '/SendTextMsg'].includes(route) &&
+        !/^\/WeChatAgent\/voice-deliveries\/[a-f0-9-]{36}$/.test(route)) {
+      throw Object.assign(new AdapterError('API_HTTP_409'), { senderCode: 'HELPER_OPERATION_UNSUPPORTED' });
+    }
+    if (this.senderBackend === INPUT_BACKEND) {
+      const rejected = code => Object.assign(new AdapterError('API_HTTP_409'), { senderCode: code });
+      const voice = route === '/SendVoiceMsg';
+      if (!['/SendTextMsg', '/SendFileMsg', '/SendVoiceMsg'].includes(route)) throw rejected('INPUT_OPERATION_UNSUPPORTED');
+      if (voice && body.wxidorgid !== 'filehelper') throw rejected('INPUT_VOICE_FILEHELPER_ONLY');
+      const sessions = await this.reader('/api/v1/sessions?limit=500');
+      const session = (sessions.sessions ?? []).find(item => item.username === body.wxidorgid);
+      const name = session?.displayName;
+      if (typeof name !== 'string' || !name.trim()) throw rejected('INPUT_TARGET_NAME_MISSING');
+      // Ctrl+F matches substrings: the name must not occur in any other contact or group.
+      const matches = await this.reader('/api/v1/contacts?keyword=' + encodeURIComponent(name) + '&limit=100');
+      const problem = uniqueSearchName(name, body.wxidorgid, matches.contacts);
+      if (problem) throw rejected(problem);
+      const kind = body.wxidorgid.includes('@chatroom') ? 'group' : 'private';
+      const target = conversationId(body.wxidorgid, name, session.conversationId);
+      const operation = voice ? 'voice' : route === '/SendTextMsg' ? 'text' : 'file';
+      return this.inputSender.request(operation, {
+        account, kind, target: String(target), name,
+        ...(voice ? { wxid: body.wxidorgid, pcmBase64: body.pcmBase64 }
+          : route === '/SendTextMsg' ? { text: body.msg } : { path: body.path, md5: body.md5, size: body.size }),
+      });
+    }
     return this.json(this.hook.baseUrl, route, {
       method: body === undefined ? 'GET' : 'POST',
       headers: { Authorization: 'Bearer ' + this.nativeToken, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
@@ -113,10 +204,46 @@ export class HookOneBot {
   }
   async checkNative() {
     this.status.hook_connected = false; this.status.hook_account_verified = false;
+    this.status.native_voice_send = false;
     this.startupStage='reader-status';
     const reader = await this.reader('/api/v1/reader/status').catch(error=>{throw healthError(error,'READER','reader-status',this.api.reader_base_url);});
     if (!reader || reader.backend !== 'weflow-cli-nt' || !reader.ownWxid || !reader.accountDirectory) fail('READER_ACCOUNT_METADATA_REQUIRED');
     this.ownWxid = reader.ownWxid;
+    if (this.helperVoiceOnly || this.senderBackend === HELPER_BACKEND) {
+      this.startupStage = 'helper-voice-health';
+      this.status.sender_connected = false; this.status.sender_account_verified = false;
+      const health = await this.native('/WeChatAgent/health')
+        .catch(error => { throw healthError(error, 'HELPER', this.startupStage, this.hook.baseUrl); });
+      if (health?.integration !== 'WeChatAgent-Helper-Voice-1' || health.version !== '4.2.0.12' ||
+          health.nativeVoiceSend !== true) fail('HELPER_VOICE_NOT_READY');
+      if (health.account !== reader.ownWxid) fail('HELPER_VOICE_ACCOUNT_MISMATCH');
+      const voiceTargets = health.voiceTargets === undefined ? ['filehelper'] : health.voiceTargets;
+      if (!Array.isArray(voiceTargets) || voiceTargets.length > 500 ||
+          !voiceTargets.every(target => typeof target === 'string' && target.length > 0 && target.length <= 137)) {
+        fail('HELPER_VOICE_TARGETS_INVALID');
+      }
+      // The full backend also sends every text reply through Helper; check both once at startup.
+      const textSend = health.nativeTextSend === true;
+      if (this.senderBackend === HELPER_BACKEND && !textSend) fail('HELPER_TEXT_NOT_READY');
+      Object.assign(this.status, { native_voice_send: true, native_text_send: textSend, version: health.version,
+        sender_connected: true, sender_account_verified: true, native_sticker_send: false, native_file_send: false, fileTransfer: 'durable-outbox-v1' });
+      return { account: reader.accountDirectory.toLowerCase(), senderAccount: reader.ownWxid, selfId: onebotId(reader.ownWxid),
+        voiceSend: true, textSend, voiceTransport: 'helper', voiceTargets };
+    }
+    if (this.senderBackend === INPUT_BACKEND) {
+      this.startupStage = 'input-health';
+      this.status.sender_connected = false; this.status.sender_account_verified = false;
+      let health;
+      try { health = await this.inputSender.request('health', { account: reader.accountDirectory }); }
+      catch (error) { throw Object.assign(new AdapterError(error.code ?? 'INPUT_HEALTH_FAILED'), { cause: error }); }
+      const problem = inputAccountProblem(health, reader.accountDirectory);
+      if (problem) fail(problem);
+      const voiceSend = health.version === '4.2.0.12' && health.voiceSend === true && health.paused !== true;
+      Object.assign(this.status, { sender_connected: true, sender_account_verified: true, version: health.version, foreground: true, ocr: false,
+        foreground_voice_send: voiceSend, foreground_voice_error: health.voiceSendError ?? '',
+        paused: health.paused === true, file_send: health.fileSend === true, native_file_send: false, native_sticker_send: false, fileTransfer: 'durable-outbox-v1' });
+      return { account: reader.accountDirectory.toLowerCase(), selfId: onebotId(reader.ownWxid), voiceSend, voiceTransport: 'desktop' };
+    }
     this.startupStage='hook-health';
     const native = await this.native('/WeChatAgent/health').catch(error=>{throw healthError(error,'HOOK','hook-health',this.hook.baseUrl);});
     if(!native || typeof native!=='object')fail('HOOK_HEALTH_INVALID_RESPONSE');
@@ -125,16 +252,25 @@ export class HookOneBot {
     const accountProblem=hookAccountProblem(native,reader.accountDirectory,this.hook.expectedVersion);
     if(accountProblem)fail(accountProblem);
     this.status.hook_account_verified = true;
-    return { account: reader.accountDirectory.toLowerCase(), selfId: onebotId(reader.ownWxid) };
+    const voiceSend = native.version === '4.2.0.12' && native.nativeVoiceSend === true;
+    this.status.native_voice_send = voiceSend;
+    const receiptAccount = native.version === '4.2.0.12' && native.nativeVoiceProtocol === 'silk-receipt-v1' ? reader.ownWxid : undefined;
+    const account = reader.accountDirectory.toLowerCase();
+    // Older reader settings may use the database directory name as the self ID.
+    const voiceSenderWxid = receiptAccount?.toLowerCase() === account ? cleanAccountId(receiptAccount) : receiptAccount;
+    return { account, selfId: onebotId(reader.ownWxid), voiceSend, receiptAccount, voiceSenderWxid,
+      voiceTargets: receiptAccount && native.nativeVoiceTestOnly === true ? ['filehelper'] : undefined };
   }
   async waitForNative({timeoutMs=35000,intervalMs=250,onWaiting=()=>{}}={}) {
+    // The selected clean client may still be logging in; never launch or restart it here.
+    const waitable=this.senderBackend===INPUT_BACKEND?['INPUT_WECHAT_NOT_RUNNING','INPUT_ACCOUNT_UNVERIFIED','INPUT_WINDOW_NOT_READY']:this.senderBackend===HELPER_BACKEND?['HELPER_NOT_LISTENING','HELPER_HEALTH_TIMEOUT']:['HOOK_NOT_LISTENING','HOOK_HEALTH_TIMEOUT','HOOK_LOGIN_REQUIRED','HOOK_INITIALIZATION_PENDING'];
     if(!Number.isFinite(timeoutMs)||timeoutMs<1||timeoutMs>60000||!Number.isFinite(intervalMs)||intervalMs<1)fail('INVALID_HOOK_WAIT');
     const deadline=Date.now()+timeoutMs;let notified=false;
     for(;;){
       try{return await this.checkNative();}
       catch(error){
-        if(!(error instanceof AdapterError)||!['HOOK_NOT_LISTENING','HOOK_HEALTH_TIMEOUT','HOOK_LOGIN_REQUIRED','HOOK_INITIALIZATION_PENDING'].includes(error.message))throw error;
-        if(Date.now()>=deadline){if(error.message==='HOOK_LOGIN_REQUIRED')throw error;fail('HOOK_INITIALIZATION_TIMEOUT');}
+        if(!(error instanceof AdapterError)||!waitable.includes(error.message))throw error;
+        if(Date.now()>=deadline){if(error.message==='HOOK_LOGIN_REQUIRED'||this.senderBackend===INPUT_BACKEND)throw error;fail('HOOK_INITIALIZATION_TIMEOUT');}
         if(!notified){notified=true;onWaiting(error.message);}
         await new Promise(resolve=>setTimeout(resolve,Math.min(intervalMs,Math.max(1,deadline-Date.now()))));
       }
@@ -154,6 +290,16 @@ export class HookOneBot {
     return result.messages;
   }
   async send(kind, target, text, deliveryId, proactive) {
+    // Helper sends at most 1023 UTF-8 bytes per message; longer replies become
+    // consecutive deliveries, each with its own record and receipt.
+    if (this.senderBackend === HELPER_BACKEND && Buffer.byteLength(text, 'utf8') > HELPER_TEXT_BYTES) {
+      const base = deliveryId ?? this.textDeliveries.key(kind, target, undefined, text);
+      let last;
+      for (const [index, part] of utf8Parts(text).entries()) {
+        last = await this.send(kind, target, part, crypto.createHash('sha256').update(base + '\0helper-part-' + index).digest('hex'), index === 0 ? proactive : null);
+      }
+      return last;
+    }
     const key = `${kind}:${target}`;
     if (this.targetsSending.has(key) || this.targetsSending.size >= (this.hook.maxConcurrentSends ?? 4)) fail('SENDER_BUSY');
     this.targetsSending.add(key);
@@ -177,6 +323,7 @@ export class HookOneBot {
       if(attempt?.state==='confirmed')attempt=null;
       this.reload();
       if (!this.allowed(kind, target)) fail('CONVERSATION_NOT_ALLOWED');
+      if (this.senderBackend === INPUT_BACKEND && this.status.paused) fail('INPUT_PAUSED');
       if(!attempt){
         const currentRows=await this.messages(wxid);
         if(proactive)this.assertProactive(kind,target,currentRows,proactive,identity,wxid);
@@ -190,11 +337,12 @@ export class HookOneBot {
           this.textDeliveries.put(attempt);
         };
         let accepted;
-        try{accepted=await this.native('/SendTextMsg',{wxidorgid:wxid,msg:text},identity.account);}
+        const helperText=this.senderBackend===HELPER_BACKEND;
+        try{accepted=await this.native('/SendTextMsg',{wxidorgid:wxid,msg:text,...(helperText?{operationId:operation}:{})},helperText?identity.senderAccount:identity.account);}
         catch(error){
           if(/^API_HTTP_(400|401|403|409|429)$/.test(error.message)){
             reject(error.message);
-            throw new AdapterError(error.message==='API_HTTP_429'?'SENDER_BUSY':error.message,{rejected:true,attempted:false,delivery_id:deliveryId??operation});
+            throw new AdapterError(error.message==='API_HTTP_429'?'SENDER_BUSY':error.senderCode??error.message,{rejected:true,attempted:false,delivery_id:deliveryId??operation});
           }
           attempt.state='unconfirmed';this.textDeliveries.put(attempt);
           throw new AdapterError('TEXT_DELIVERY_UNCONFIRMED',{attempted:true,delivery_id:deliveryId??operation});
@@ -378,8 +526,17 @@ export class HookOneBot {
         const kind=params.kind,target=String(params.target??'');
         if(!['group','private'].includes(kind)||!/^\d+$/.test(target))fail('INVALID_STICKER_TARGET');
         data=action==='get_sticker_list'?await this.stickerList(kind,target,params.query):await this.stickerLabels(kind,target,{operation:action==='get_sticker_labels'?'read':'save',...(action==='get_sticker_labels'?{ids:params.ids}:{labels:params.labels})});
+      } else if (action === 'get_voice_capability' || action === 'send_voice_text') {
+        const kind = params.kind, target = String(params.target ?? '');
+        if (!['group', 'private'].includes(kind) || !/^\d+$/.test(target) || !this.allowed(kind, target)) fail('CONVERSATION_NOT_ALLOWED');
+        if (action === 'get_voice_capability') data = await this.voiceSend.capability(kind, target);
+        else {
+          if (!/^[a-f0-9]{64}$/.test(params.wechatagent_delivery_id ?? '') || typeof params.text !== 'string') fail('INVALID_DELIVERY_ID');
+          data = await this.voiceSend.speakReply({ kind, target, text: params.text, deliveryId: params.wechatagent_delivery_id });
+        }
       } else if (action === 'get_status') {
-        data = { online: this.status.hook_account_verified, good: this.status.hook_account_verified && this.status.reader_connected };
+        const verified = this.status.hook_account_verified || this.status.sender_account_verified === true;
+        data = { online: verified, good: verified && this.status.reader_connected };
       } else if (action === 'get_version_info') {
         data = { app_name: 'WeChatAgent-WeChat-Hook', app_version: '1', protocol_version: 'v11' };
       } else if (action === 'get_login_info') {
@@ -436,10 +593,81 @@ export class HookOneBot {
   enqueue(payload) {
     const event = this.incoming(payload);
     if (!event || !event.message_id || this.seen.has(event.message_id)) return;
+    if (this.queueRealtime(payload, event)) {
+      this.rememberEvent(event);
+      return;
+    }
+    if (this.helperVoiceOnly) return;
     if (this.pending.length >= 200) fail('EVENT_QUEUE_FULL');
-    this.pending.push(event); this.seen.set(event.message_id, true);
+    this.pending.push(event);
+    this.rememberEvent(event);
+    this.flush();
+  }
+  // A Realtime provider without text input hands the message back to the bridge.
+  forward(event) {
+    if (this.helperVoiceOnly || this.stopped) return;
+    if (this.pending.length >= 200) { this.status.last_error = 'EVENT_QUEUE_FULL'; return; }
+    this.pending.push(event);
+    this.flush();
+  }
+  rememberEvent(event) {
+    this.seen.set(event.message_id, true);
     while (this.seen.size > 5000) this.seen.delete(this.seen.keys().next().value);
-    this.status.received++; this.flush();
+    this.status.received++;
+  }
+  // Trigger rules for one Realtime turn, rechecked before deciding and before
+  // every send. Group text always needs an @ to this account: the Realtime
+  // model has no silent option, unlike the DSH social pipeline.
+  realtimePermitted({kind, target, sender, mentioned, input}) {
+    const key = 'wechat:' + kind + ':' + target;
+    return () => {
+      this.reload();
+      const wechat = this.project.wechat;
+      if (this.stopped || !this.allowed(kind, target)) return false;
+      if (!this.voiceSend.synthesis.candidates(key, dialogueFeature).length) return false;
+      if (conversationWorkMode(wechat, key) === 'assistant' && !assistantSenderAllowed(wechat, key, sender)) return false;
+      if (kind === 'private') return true;
+      if (input === 'text') return mentioned;
+      return conversationMode(wechat, key) !== 'mention' || mentioned;
+    };
+  }
+  queueRealtime(payload, event) {
+    const voice = payload.type === 34, text = payload.type === 1;
+    if (!voice && !text) return false;
+    const kind = event.message_type;
+    // The whitelist ID (not the OneBot user_id hash) names a private chat.
+    const target = String(conversationId(payload.sessionId, payload.groupName, payload.conversationId));
+    if (!this.voiceSend.synthesis.candidates('wechat:' + kind + ':' + target, dialogueFeature).length) return false;
+    const mentioned = event.message.some(segment => segment.type === 'at' && segment.data.qq === String(event.self_id));
+    const input = { kind, target, wxid: payload.sessionId, sender: payload.talkerId, mentioned,
+      ...(voice ? { voiceId: payload.voice.id } : { text: payload.content.trim(), rawid: payload.rawid }) };
+    if (text && (!payload.rawid || !input.text || input.text.length > 4096)) return false;
+    const permitted = this.realtimePermitted({ ...input, input: voice ? 'voice' : 'text' });
+    if (!permitted()) return false;
+    return this.scheduleRealtime(() => this.realtime.handle(input, permitted), event);
+  }
+  scheduleRealtime(run, event) {
+    if (this.realtimePending >= 8) {
+      this.status.last_error = 'VOICE_REALTIME_QUEUE_FULL';
+      return true;
+    }
+    this.realtimePending++;
+    this.realtimeQueue = this.realtimeQueue.then(async () => {
+      if (this.stopped) return;
+      const result = await run();
+      if (result?.status === 'forward' && event) this.forward(event);
+      else if (result?.status === 'rejected' && result.error) this.status.last_error = result.error;
+    }).catch(error => {
+      this.status.last_error = /^VOICE_[A-Z0-9_]{1,80}$/.test(error?.code ?? '') ? error.code : 'VOICE_REALTIME_FAILED';
+    }).finally(() => { this.realtimePending--; });
+    return true;
+  }
+  // Replies decided before a restart are sent (or their receipts checked) once.
+  resumeRealtime() {
+    for (const record of this.realtime.pending()) {
+      const permitted = this.realtimePermitted(record);
+      this.scheduleRealtime(() => this.realtime.resume(record, permitted));
+    }
   }
   flush() {
     while (this.socket?.readyState === WebSocket.OPEN && this.pending.length) {
@@ -508,11 +736,16 @@ export class HookOneBot {
   async start() {
     await this.checkNative();
     this.server = http.createServer((req, res) => {
+      if (this.voiceSend.handle(req, res)) return;
       if (req.method !== 'GET') { res.writeHead(405); res.end(); return; }
       if (req.url === '/status') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(this.status));
       } else if (req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        if (this.helperVoiceOnly) {
+          res.end('<!doctype html><meta charset="utf-8"><title>WeChatAgent</title><h1>WeChatAgent · 后台语音验证</h1>');
+          return;
+        }
         res.end('<!doctype html><meta charset="utf-8"><title>WeChatAgent</title><h1>WeChatAgent · WeChat-Hook</h1><p>OneBot v11 · 后台文字发送</p><pre id="status">加载中</pre><script>async function update(){try{document.getElementById("status").textContent=JSON.stringify(await(await fetch("/status")).json(),null,2)}catch{document.getElementById("status").textContent="状态服务未连接"}}update();setInterval(update,2000)</script>');
       } else { res.writeHead(404); res.end(); }
     });
@@ -520,36 +753,55 @@ export class HookOneBot {
     try{await new Promise((resolve, reject) => { this.server.once('error', reject); this.server.listen(this.project.ports.adapter, '127.0.0.1', resolve); });}
     catch(error){const code=systemErrorCode(error);throw startupError(code==='EADDRINUSE'?'ADAPTER_PORT_IN_USE':['EACCES','EPERM'].includes(code)?'ADAPTER_PORT_DENIED':'ADAPTER_LISTEN_FAILED',error,'adapter-port-bind',this.project.ports.adapter);}
     this.status.ready=true;
+    this.resumeRealtime();
+    if (this.helperVoiceOnly) {
+      this.tasks = [this.receiveSse()];
+      console.log('WeChatAgent background voice adapter ready; Helper and NT reader account verified.');
+      return;
+    }
     this.tasks = [this.connectOneBot(), this.receiveSse()];
     this.fileTimer=setInterval(()=>{try{this.fileWorker.tick();}catch{}},1000);this.fileTimer.unref();
     let checking = false;
+    // Input-mode health spawns a worker process; check less often and never during a send.
     this.healthTimer = setInterval(async () => {
-      if (checking || this.stopped) return;
+      if (checking || this.stopped || this.inputSender?.busy) return;
       checking = true;
       try { await this.checkNative(); }
       catch (error) { this.status.last_error = error instanceof AdapterError ? error.message : 'BACKEND_UNAVAILABLE'; }
       finally { checking = false; }
-    }, 5000);
-    console.log('WeChat-Hook OneBot v11 adapter ready; native account/version verified.');
+    }, this.senderBackend === INPUT_BACKEND ? 15000 : 5000);
+    console.log(this.senderBackend === INPUT_BACKEND
+      ? 'WeChat-Hook OneBot v11 adapter ready; foreground input sender (keyboard only, no OCR) verified on a clean client.'
+      : this.senderBackend === HELPER_BACKEND
+        ? 'WeChat-Hook OneBot v11 adapter ready; Helper text and voice sender verified for the reader account.'
+        : 'WeChat-Hook OneBot v11 adapter ready; native account/version verified.');
   }
   async stop() {
     this.stopped = true;this.status.ready=false; for (const controller of this.controllers) controller.abort();
-    clearInterval(this.healthTimer);clearInterval(this.fileTimer);this.fileWorker.stop();
+    clearInterval(this.healthTimer);clearInterval(this.fileTimer);this.fileWorker.stop();this.inputSender?.close();
+    await this.voiceSend.close();
     this.socket?.close();
     if (this.server) await new Promise(resolve => this.server.close(resolve));
-    await Promise.allSettled(this.tasks ?? []);
+    await Promise.allSettled([...(this.tasks ?? []), this.realtimeQueue]);
   }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   let adapter;
   try {
-    adapter = new HookOneBot();
+    adapter = new HookOneBot({ helperVoiceOnly: process.argv.includes('--helper-voice-only') });
     if (process.argv.includes('--check')) {
-      await adapter.waitForNative({onWaiting:()=>console.log('WeChat-Hook: waiting for the matching client initialization...')}); console.log('WeChat-Hook: matching version and selected account database verified.');
+      if (adapter.helperVoiceOnly) {
+        await adapter.checkNative();
+        console.log('Helper voice: matching version and selected account database verified.');
+      } else {
+        const input=adapter.senderBackend===INPUT_BACKEND;
+        await adapter.waitForNative({onWaiting:()=>console.log(input?'Foreground input: waiting for the selected clean WeChat to finish logging in...':'WeChat-Hook: waiting for the matching client initialization...')});
+        console.log(input?'Foreground input: clean client, account database and main window verified.':'WeChat-Hook: matching version and selected account database verified.');
+      }
     } else {
       await adapter.start();
       for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await adapter.stop(); process.exit(0); });
     }
-  } catch (error) { console.error(adapterStartupMessage(error,{checkOnly:process.argv.includes('--check'),stage:adapter?.startupStage,port:adapter?.project?.ports?.adapter})); process.exitCode = 1; }
+  } catch (error) { console.error(adapterStartupMessage(error,{checkOnly:process.argv.includes('--check'),stage:adapter?.startupStage,port:adapter?.project?.ports?.adapter,sender:adapter?.senderBackend})); process.exitCode = 1; }
 }

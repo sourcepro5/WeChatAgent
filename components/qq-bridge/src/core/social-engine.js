@@ -11,7 +11,7 @@ import {notebookQuery} from '../../../../packages/dsh-social-bridge-plugin/fish-
 import { LOCKED_BEHAVIOR_REPLY, isBehaviorChangeCommand } from './chat-policy.js';
 import { normalizeForwardedRecord, forwardedRecordText, normalizeQuoteReply, quoteReplyText } from './wechat-events.js';
 import { selectStickerChoices, cleanStickerLabel, stickerPolicyKey } from './sticker-policy.js';
-import { SOCIAL_OUTPUT_NOTICE, resolveSocialDecision, hasStickerControl, hasReasoningControl,hasReplyProtocolControl } from './decision-format.js';
+import { SOCIAL_OUTPUT_NOTICE, SOCIAL_VOICE_NOTICE, resolveSocialDecision, hasStickerControl, hasReasoningControl,hasReplyProtocolControl } from './decision-format.js';
 export { parseSocialDecision } from './decision-format.js';
 import {SEARCH_DEFAULTS,searchPolicyKey,searchQuery} from '../../../../packages/dsh-social-bridge-plugin/search-policy.mjs';
 import {wakeContextHint} from '../../../../packages/dsh-social-bridge-plugin/request-window.mjs';
@@ -114,7 +114,7 @@ export function replyCooldown(recent, now, { intervalMs, maxPerMinute, maxPerTen
 export class SocialEngine {
   constructor({ buffer, decide, send, roleFor = () => '', personaNameFor = () => '',workModeFor=()=> 'social', wakeWords = [], mode = 'hybrid',
     assistantBatchMs=650,assistantChatOnly=false,maxTextPartsFor=()=>2,notebookEnabledFor=()=>false,batchMs = 3000, minIntervalMs = 15000, privateMinIntervalMs = 1000,
-    maxPerMinute = 3, maxPerTenMinutes = 10, stickerChoicesFor = async()=>[], sendSticker,
+    maxPerMinute = 3, maxPerTenMinutes = 10, stickerChoicesFor = async()=>[], sendSticker, sendVoice, voiceReplyFor = async()=>false,
     stickerPolicyFor=()=>({enabled:true,labelCache:true}),stickerLabelsFor=async()=>[],saveStickerLabels=async()=>{},
     assistantAccess=()=>false,assistantControl,modeFor,searchFor=async()=>null,modelSearchReady=async()=>false,searchPolicyFor=()=>SEARCH_DEFAULTS,stickerSelect=selectStickerChoices,deliveryRetry={},connection=null,log = () => {} }) {
     Object.assign(this, { buffer, decide, send, roleFor, personaNameFor,workModeFor, wakeWords, mode, batchMs,
@@ -123,6 +123,7 @@ export class SocialEngine {
     this.connection=connection;if(connection)connection.onBoundary=()=>this.suspendConnection();
     this.assistantChatOnly=assistantChatOnly;this.assistantBatchMs=assistantBatchMs;this.modeFor=modeFor??(()=>this.mode);this.assistantControl=assistantControl;this.assistantAccess=assistantAccess;
     this.maxTextPartsFor=maxTextPartsFor;this.notebookEnabledFor=notebookEnabledFor;
+    this.sendVoice=sendVoice;this.voiceReplyFor=voiceReplyFor;
     this.timers = new Map(); this.running = new Set(); this.dirty = new Set();
     this.pendingDirect = new Set(); this.sentAt = new Map();
     this.decisions = new Map();
@@ -356,6 +357,10 @@ export class SocialEngine {
         searchPrivateNames:[...new Set(chatRows.filter(row=>!row.outgoing&&!row.forwardedRecord).map(row=>row.sender_name).filter(name=>typeof name==='string'&&name.length>=2&&name.length<=80))].slice(0,50),
         batchId: crypto.createHash('sha256').update(JSON.stringify([key,rows.map(row=>row.id),policyKey,searchKey,stickerChoices,decisionImages,knownLabels,contextNotice?.id,'dsh-native-only-v1',wakeMode,'output-format-v2'])).digest('hex') };
       metadata.batchId=crypto.createHash('sha256').update(metadata.batchId+'\0reply-messages:'+maxTextParts).digest('hex');
+      // The model may choose RESPOND_VOICE: only when WCA can send native voice to this chat now.
+      const voiceReply=!remembered&&!savedRequest&&chatRows.length&&!notebookRequest&&(workMode==='social'||this.assistantChatOnly)&&typeof this.sendVoice==='function'
+        ?await boundedTask(()=>this.voiceReplyFor(message),{timeoutMs:2000}).then(value=>value===true,()=>false):false;
+      if(voiceReply){metadata.voiceReply=true;prompt+='\n'+SOCIAL_VOICE_NOTICE;metadata.batchId=crypto.createHash('sha256').update(metadata.batchId+'\0voice-reply-v1').digest('hex');}
       if(wakeContext)metadata.batchId=crypto.createHash('sha256').update(metadata.batchId+'\0'+JSON.stringify(wakeContext)).digest('hex');
       const searchRows=chatRows;
       if(!remembered&&!savedRequest&&chatRows.length){
@@ -407,7 +412,7 @@ export class SocialEngine {
       if(workMode==='assistant'&&(!rows.every(row=>this.assistantAllowed(key,row)))){this.buffer.markProcessed(key,throughId);this.decisions.delete(key);this.buffer.forgetReply(key);completed=true;this.log('[Assistant] '+key+' result_discarded reason=access_changed');return;}
       if(policy.enabled)for(const choice of metadata.memeChoices??[])if(choice.source==='dsh-meme'&&/^[a-f0-9]{64}$/.test(choice.id??'')&&cleanStickerLabel(choice)&&!stickerChoices.some(item=>item.id===choice.id))stickerChoices.push(choice);
       const resolved=!remembered&&chatRows.length
-        ? await resolveSocialDecision({rawOutput,key,metadata,decide:(...args)=>decideCurrent(...args),stickerRefs,allowStickerCaption:true,allowTextParts:metadata.fishNotebookDocument!==true,maxTextParts:metadata.replyMaxMessages??2,maxChars:workMode==='assistant'&&!this.assistantChatOnly?12000:1200,log:this.log})
+        ? await resolveSocialDecision({rawOutput,key,metadata,decide:(...args)=>decideCurrent(...args),stickerRefs,allowStickerCaption:true,allowVoice:metadata.voiceReply===true,allowTextParts:metadata.fishNotebookDocument!==true,maxTextParts:metadata.replyMaxMessages??2,maxChars:workMode==='assistant'&&!this.assistantChatOnly?12000:1200,log:this.log})
         : {output:null,result:remembered?.result??{decision:'RESPOND',text:LOCKED_BEHAVIOR_REPLY}};
       const {output,result}=resolved;
       if(result.decision==='RESPOND'&&[result.text,...(result.textParts??[])].some(hasReasoningControl)){
@@ -479,7 +484,7 @@ export class SocialEngine {
     };
     if(pending.message?.work_mode==='assistant'&&!this.assistantAllowed(key,pending.message))return finish();
     if(pending.cancelTextParts)return finish('本机已按当前聊天的“停止分段”指令取消旧回复尚未发送的部分；此前已确认送达的内容保留，不能声称剩余部分也已发送。');
-    if(pending.parts.some(part=>part.text&&hasReplyProtocolControl(part.text)&&!['confirmed','unconfirmed','failed','cancelled','expired'].includes(part.state))){
+    if(pending.parts.some(part=>[part.text,part.voiceText].some(text=>text&&hasReplyProtocolControl(text))&&!['confirmed','unconfirmed','failed','cancelled','expired'].includes(part.state))){
       this.log(`[Social] ${key} delivery_cancelled reason=protocol_in_queued_text`);
       return finish('旧回复包含发送协议标记，本机已停止后续投递；先前已提交部分送达情况可能未知，不自动补发，继续处理新消息。');
     }
@@ -504,13 +509,58 @@ export class SocialEngine {
       if(part.stickerId&&!receiptOnly&&!(await this.stickerPolicyFor(target)).enabled){part.state='cancelled';return finish('本机上一轮文字已发送，但配图因表情开关关闭而取消；不能当成已经发过该图。');}
       if(receiptOnly)part.receiptChecks=(part.receiptChecks??0)+1;
       const before=part.state;part.state='sending';delete part.retryAt;persist();
+      // A voice part is synthesized and sent by WCA. Only a definite "nothing
+      // submitted" answer turns it into one text message with its own delivery.
+      if(part.voiceText&&!part.voiceFallback){
+        let voiced;
+        try{voiced=await boundedTask(()=>this.sendVoice(target,part.voiceText,{deliveryId:part.deliveryId}),{timeoutMs:50000,code:'VOICE_DELIVERY_TIMEOUT'});}
+        catch(error){
+          if(error.code==='VOICE_DELIVERY_TIMEOUT'||/^OneBot action timeout:/.test(error.message??'')){
+            part.state='unconfirmed';
+            this.buffer.recordReplyPart(key,{deliveryId:part.deliveryId},{...target,sender_id:target.self_id,text:'[语音] '+part.voiceText,timestamp:Date.now()/1000,delivery_status:'unconfirmed'});
+            this.log(`[Social] ${key} delivery_part=${index+1} state=unconfirmed reason=voice_timeout operation=${part.deliveryId.slice(0,12)}`);
+            return finish('本机上一轮语音回复的提交响应超时，送达情况未知，不自动重发，后续消息继续处理。');
+          }
+          if(error.code==='SENDER_BUSY'){
+            part.state=before==='submitted'?'submitted':'queued';part.busyAttempts=(part.busyAttempts??0)+1;part.busyDeadline??=Date.now()+retry.busyTimeoutMs;
+            if(part.busyAttempts>retry.maxBusyRetries){part.state='expired';return finish('本机上一轮语音因发送器持续忙碌而超时，尚未发送的语音已取消，不能当成对方已收到。');}
+            return wait(Math.min(part.busyDeadline,Date.now()+Math.min(5000,retry.busyDelayMs*2**(part.busyAttempts-1))));
+          }
+          part.state=before;persist();throw error;
+        }
+        if(voiced?.fallback===true){
+          part.voiceFallback=true;part.state='queued';persist();
+          this.log(`[Social] ${key} delivery_part=${index+1} voice_fallback=text reason=${/^VOICE_[A-Z_]{1,60}$/.test(voiced.error??'')?voiced.error:'VOICE_NOT_SUBMITTED'} operation=${part.deliveryId.slice(0,12)}`);
+        }else{
+          const confirmed=voiced?.status==='confirmed',sentAt=Date.now();
+          if(voiced?.status==='pending'&&(part.receiptChecks??0)<retry.maxReceiptChecks){
+            part.state='submitted';part.receiptChecks=(part.receiptChecks??0)+1;
+            this.log(`[Social] ${key} delivery_part=${index+1} state=submitted mode=voice awaiting_receipt=true operation=${part.deliveryId.slice(0,12)}`);
+            return wait(Date.now()+retry.receiptDelayMs);
+          }
+          if(voiced?.status==='rejected'){
+            part.state='failed';
+            this.log(`[Social] ${key} delivery_part=${index+1} state=failed mode=voice reason=${/^VOICE_[A-Z_]{1,60}$/.test(voiced.error??'')?voiced.error:'VOICE_NATIVE_REJECTED'} operation=${part.deliveryId.slice(0,12)}`);
+            return finish('本机上一轮语音回复被发送端拒绝，送达情况未知，不自动改发文字；继续处理新消息。');
+          }
+          const existing=this.buffer.recent(key,this.buffer.maxPerChat).some(row=>row.outgoing&&row.delivery_id===part.deliveryId);
+          part.state=confirmed?'confirmed':'unconfirmed';persist();
+          this.buffer.recordReplyPart(key,{deliveryId:part.deliveryId},{...target,sender_id:target.self_id,text:'[语音] '+part.voiceText,timestamp:sentAt/1000,delivery_status:confirmed?'confirmed':'unconfirmed'});
+          if(!existing)this.noteOutgoing(key,sentAt);
+          this.log(`[Social] ${key} delivery=${confirmed?'confirmed':'unconfirmed'} mode=voice part=${index+1} operation=${part.deliveryId.slice(0,12)}`);
+          if(!confirmed)return finish('本机上一轮语音回复已提交，但未能确认送达，不能当成对方已收到；不自动重发。');
+          continue;
+        }
+      }
+      const partText=part.voiceFallback?part.voiceText:part.text;
+      const partDelivery=part.voiceFallback?crypto.createHash('sha256').update(part.deliveryId+'\0voice-fallback').digest('hex'):part.deliveryId;
       let delivery;
       try{
-        delivery=await boundedTask(()=>this.send(target,part.text,{deliveryId:part.deliveryId}),{timeoutMs:15000,code:'TEXT_DELIVERY_TIMEOUT'});
+        delivery=await boundedTask(()=>this.send(target,partText,{deliveryId:partDelivery}),{timeoutMs:15000,code:'TEXT_DELIVERY_TIMEOUT'});
       }catch(error){
         if(error.code==='TEXT_DELIVERY_TIMEOUT'||/^OneBot action timeout:/.test(error.message??'')){
           part.state='unconfirmed';
-          this.buffer.recordReplyPart(key,{deliveryId:part.deliveryId},{...target,sender_id:target.self_id,text:part.text,timestamp:Date.now()/1000,delivery_status:'unconfirmed'});
+          this.buffer.recordReplyPart(key,{deliveryId:part.deliveryId},{...target,sender_id:target.self_id,text:partText,timestamp:Date.now()/1000,delivery_status:'unconfirmed'});
           return finish('本机上一轮文字发送响应超时，送达情况未知，不自动重发，后续消息继续处理。');
         }
         if(pending.offlineCancelled){part.state='unconfirmed';return finish();}
@@ -539,7 +589,7 @@ export class SocialEngine {
       const existing=this.buffer.recent(key,this.buffer.maxPerChat).some(row=>row.outgoing&&row.delivery_id===part.deliveryId);
       const confirmed=delivery?.delivered!=='unconfirmed',sentAt=Date.now();
       part.state=confirmed?'confirmed':part.stickerId?'submitted':'unconfirmed';persist();
-      this.buffer.recordReplyPart(key,{deliveryId:part.deliveryId},{...target,sender_id:target.self_id,text:part.stickerId?(confirmed?'[已发送微信原生表情包]':'[微信原生表情已提交，送达待确认]'):part.text,timestamp:sentAt/1000,delivery_status:confirmed?'confirmed':'unconfirmed',...(part.stickerId?{sticker_id:part.stickerId}:{})});
+      this.buffer.recordReplyPart(key,{deliveryId:part.deliveryId},{...target,sender_id:target.self_id,text:part.stickerId?(confirmed?'[已发送微信原生表情包]':'[微信原生表情已提交，送达待确认]'):partText,timestamp:sentAt/1000,delivery_status:confirmed?'confirmed':'unconfirmed',...(part.stickerId?{sticker_id:part.stickerId}:{})});
       if(!existing)this.noteOutgoing(key,sentAt);
       this.log(`[Social] ${key} delivery=${confirmed?'confirmed':'unconfirmed'} part=${index+1} operation=${part.deliveryId.slice(0,12)}`);
       if(!confirmed){

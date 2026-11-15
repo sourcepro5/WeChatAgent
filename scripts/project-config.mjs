@@ -21,6 +21,7 @@ import {validateMemberMemory} from '../packages/dsh-social-bridge-plugin/member-
 import {validateConversationSettings,conversationMode} from '../packages/dsh-social-bridge-plugin/conversation-policy.mjs';
 import {migrateDshSettings} from '../packages/dsh-social-bridge-plugin/dsh-migration.mjs';
 import {hookProfile} from './hook-profiles.mjs';
+import {INPUT_BACKEND,inputSettings} from './input-sender.mjs';
 export const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
 const write = (file, value) => {
@@ -41,7 +42,18 @@ export function validateConfig(config) {
   validateWebReaderSettings(config.wechat?.webReader);
   if (config.version !== 1) throw new Error('Unsupported WeChatAgent config version');
   if (!['nt', 'bundled', 'existing'].includes(config.runtime?.weflowMode ?? 'nt')) throw new Error('weflowMode must be nt, bundled or existing');
-  if (config.runtime?.sender !== 'wechat-hook') throw new Error('sender must be wechat-hook; the UIA sender has been removed');
+  if (!['wechat-hook', INPUT_BACKEND, 'wechat-helper'].includes(config.runtime?.sender)) throw new Error('sender must be wechat-hook, wechat-input or wechat-helper; the UIA sender has been removed');
+  if (config.runtime.sender === 'wechat-helper') {
+    // Helper sends text and voice through its own WeChat 4.2.0.12 connection.
+    if ((config.runtime.weflowMode ?? 'nt') !== 'nt') throw new Error('Helper sending requires the NT reader for account and receipt checks');
+    if (config.hook?.expectedVersion !== '4.2.0.12' || !config.hook.wechatExecutable || /[\r\n"\0]/.test(config.hook.wechatExecutable)) throw new Error('Helper sending requires the selected WeChat 4.2.0.12 client');
+    const port = config.helperVoice?.port ?? 8777;
+    if (!Number.isInteger(port) || port < 1024 || port > 65535 || Object.values(config.ports ?? {}).includes(port)) throw new Error('Helper port must be 1024-65535 and distinct from the project ports');
+  }
+  if (config.runtime.sender === INPUT_BACKEND) {
+    if ((config.runtime.weflowMode ?? 'nt') !== 'nt') throw new Error('Foreground input requires the NT reader for account and receipt checks');
+    try { inputSettings(config, projectRoot); } catch (error) { throw new Error('Invalid foreground input settings: ' + error.message); }
+  }
   if (config.runtime.sender === 'wechat-hook') {
     if ((config.runtime.weflowMode ?? 'nt') !== 'nt') throw new Error('WeChat-Hook requires the NT reader for account and receipt checks');
     const url = new URL(config.hook?.baseUrl ?? '');
@@ -82,6 +94,12 @@ export function prepare(root = projectRoot) {
     const hookToken = path.join(hookDir, 'native-token.txt');
     if (!fs.existsSync(hookToken)) fs.writeFileSync(hookToken, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
     if (!/^[a-f0-9]{64}$/.test(fs.readFileSync(hookToken, 'utf8').trim())) throw new Error('Invalid native Hook token');
+  }
+  if (config.runtime.sender === 'wechat-helper') {
+    // Shared with the Helper plugin's token_file; created once, never printed.
+    const helperToken = path.join(state, 'helper-voice.token');
+    if (!fs.existsSync(helperToken)) fs.writeFileSync(helperToken, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });
+    if (!/^[a-f0-9]{64}$/.test(fs.readFileSync(helperToken, 'utf8').trim())) throw new Error('Invalid Helper token');
   }
   const tokenFile = path.join(state, 'social-dsh-token.txt');
   if (!fs.existsSync(tokenFile)) fs.writeFileSync(tokenFile, crypto.randomBytes(32).toString('hex'), { flag: 'wx', mode: 0o600 });

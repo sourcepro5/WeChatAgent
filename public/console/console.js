@@ -146,6 +146,7 @@ const actions = {
   'reader-check': ['检查读取配置', '只读检查当前数据库与凭据是否有效。'],
   'reader-connect': ['连接并验证微信', '正在获取并验证所选账号的读取凭据。请在微信中完成登录。'],
   'hook-check': ['检查发送连接', '校验发送组件、微信版本和账号。'],
+  'input-setup': ['检查模拟输入依赖', '检查安装包内置运行环境。源码运行时会准备本地独立环境。'],
   'hook-build': ['构建发送组件', '使用现有构建脚本，需要已准备的源码与 C++ 工具。'],
   'hook-pin': [
     '开启客户端保护',
@@ -194,6 +195,13 @@ const getPath = (object, path) => {
     return true;
   if (path === 'wechat.replyLayout.maxMessages') return 2;
   if (path === 'wechat.stickers.candidateLimit') return 8;
+  if (path === 'input.wechatExecutable') return '';
+  if (path === 'input.python') return '';
+  if (path === 'input.operationTimeoutMs') return 20000;
+  if (path === 'input.idleMs') return 2000;
+  if (path === 'input.sendKey') return 'enter';
+  if (path === 'input.paused') return false;
+  if (path === 'helperVoice.port') return 8777;
   if (path === 'wechat.webReader.enabled') return true;
   if (path.startsWith('wechat.search.')) return searchDefaults[path.split('.').at(-1)];
   if (path.startsWith('wechat.proactive.')) return proactiveDefaults[path.split('.').at(-1)];
@@ -1010,6 +1018,7 @@ function connectionsPage() {
   state.readerDraft ??= { dbPath: r?.dbPath ?? '', myWxid: r?.myWxid ?? '', decryptKey: '' };
   return `<div class="section-stack"><section class="card">${header('模型连接', '使用你已在 DSH 中配置的模型。', '', 'plug')}<div class="form-grid">${field('DSH 程序位置', 'runtime.dshDesktop', { full: true, browse: 'exe', placeholder: '选择 DeepSeek Harness.exe', help: '启动时若 DSH 尚未打开，会尝试打开这个程序。' })}${field('模型提供方标识', 'dsh.provider', { help: '与 DSH 中的 provider 标识一致。' })}${field('模型标识', 'dsh.model', { help: '图片理解需要当前模型支持图片输入。' })}</div>${pluginPathField()}<div class="notice plain">${icon('info')}<span>修改模型后：保存设置 → 在诊断页准备配置 → 从托盘完全退出并重新打开 DSH → 重启服务。</span></div></section>
     <section class="card">${header('微信与读取程序', '选择本机已准备的程序。', '', 'chat')}<div class="form-grid">${field('匹配微信程序位置', 'hook.wechatExecutable', { full: true, browse: 'exe', help: '选择时自动核验版本和发送组件；手动填写路径会在保存时核验。' })}<div class="field"><label for="wechat-client-version">匹配微信版本</label><input id="wechat-client-version" value="${escapeHtml(state.draft?.hook?.expectedVersion ?? state.config?.hook?.expectedVersion ?? '')}" readonly><small>版本由所选程序自动识别，保存后与程序路径一并生效。</small></div>${field('Python 程序位置', 'runtime.python', { full: true, browse: 'exe', help: '选择已有环境的 python.exe，也可填写可用的 Python 命令。' })}</div></section>
+    <section class="card">${header('微信发送方式', '前台模拟输入为实验功能：每次发送会把微信切到前台并模拟键盘，约 1–3 秒。', '', 'chat')}<div class="form-grid">${field('发送后端', 'runtime.sender', { type: 'select', options: [['wechat-hook', '原生发送（Hook）'], ['wechat-helper', 'Helper 后台文字与语音（实验）'], ['wechat-input', '前台模拟输入（实验，无 OCR）']], full: true })}${field('Helper 插件端口', 'helperVoice.port', { type: 'number', min: 1024, max: 65535, help: 'Helper 后台模式使用：与 Helper 的 wechatagent_voice 插件 port 保持一致，默认 8777。' })}${field('模拟输入使用的干净微信', 'input.wechatExecutable', { full: true, browse: 'exe', help: '留空使用当前选定的匹配微信。进程已加载 Hook 或存在代理 DLL 时，需要先退出或换用干净客户端。' })}${field('模拟输入 Python 程序（可选）', 'input.python', { full: true, browse: 'exe', help: '留空使用安装包内置运行环境。源码运行时使用项目独立环境。' })}${field('发送按键', 'input.sendKey', { type: 'select', options: [['enter', 'Enter 发送'], ['ctrl-enter', 'Ctrl+Enter 发送']], help: '需与微信“设置 → 快捷键 → 发送消息”一致。' })}${field('单次桌面操作超时 / 秒', 'input.operationTimeoutMs', { type: 'number', transform: 'seconds', min: 5, max: 30 })}${field('你在用电脑时延后发送 / 秒', 'input.idleMs', { type: 'number', transform: 'seconds', min: 0, max: 30, help: '这段时间内有键鼠操作就稍后再发；0 表示不等待。' })}${toggle('暂停模拟输入自动发送', 'input.paused', '保存后立即暂停新的桌面发送操作。')}${toggle('前台录音发语音（实验）', 'input.voiceSend', '需要匹配微信 4.2.0.12 和 VB-CABLE，仅支持文件传输助手。')}</div><p class="subtle">Helper 后台模式由 Helper 连接微信 4.2.0.12，文字和语音都经它发送，可配合语音对话插件逐轮回文字或语音；需要先自行启动 Helper 并启用 wechatagent_voice 插件（令牌文件 state/helper-voice.token），该模式下不注入 Hook，图片、表情包和文件暂不可发。</p><p class="subtle">模拟输入用 Ctrl+F 搜索聊天名称、粘贴正文、按发送键完成发送，不做 OCR，不点鼠标，以数据库回执确认送达。白名单聊天的名称不能出现在其他联系人或群名里，否则拒绝发送，请设置唯一的备注名。输入框里有草稿时不会发送。支持文字和普通文件。切换发送后端后，请完全退出原微信，再从控制台打开匹配微信并重启服务。</p><div class="button-row"><button class="button" data-action="input-setup">检查模拟输入依赖</button><button class="button" data-action="hook-check">检查当前发送方式</button></div></section>
     ${readerConfigurationCard()}
     <section class="card">${header('高级连接选项', '通常无需修改。端口需要互不重复。', '', 'sliders')}<details><summary>展开端口与发送超时设置</summary><div class="form-grid">${field('读取服务端口', 'ports.weflow', { type: 'number', min: 1024, max: 65535 })}${field('消息桥接端口', 'ports.onebot', { type: 'number', min: 1024, max: 65535 })}${field('适配器状态端口', 'ports.adapter', { type: 'number', min: 1024, max: 65535 })}${field('DSH 插件端口', 'ports.dshPlugin', { type: 'number', min: 1024, max: 65535 })}${field('发送后端地址', 'hook.baseUrl', { full: true, help: '必须为本机回环 HTTP 地址，例如 http://127.0.0.1:30001。' })}${field('发送请求超时 / 秒', 'hook.requestTimeoutMs', { type: 'number', transform: 'seconds', min: 1, max: 5, step: 0.1 })}${field('回执等待超时 / 秒', 'hook.receiptTimeoutMs', { type: 'number', transform: 'seconds', min: 1, max: 18, step: 0.1 })}${field('并发发送上限', 'hook.maxConcurrentSends', { type: 'number', min: 1, max: 4, step: 1 })}</div></details></section></div>`;
 }

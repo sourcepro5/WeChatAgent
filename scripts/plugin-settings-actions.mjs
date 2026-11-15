@@ -6,6 +6,11 @@ import {configuration,scanPlugins,validateValue,fail} from '../packages/plugin-a
 // call runs in a fresh, short-lived worker with saved settings only: no chat,
 // account, storage, documents, history, audio or reply services.
 const MESSAGES={PLUGIN_TIMEOUT:'插件检测超时，请稍后重试。',PLUGIN_CANCELLED:'检测已取消。',PLUGIN_LOAD_TIMEOUT:'插件代码未能及时启动，请稍后重试。',PLUGIN_PROCESS_EXITED:'插件代码意外退出，请检查插件版本。',PLUGIN_SERVICE_UNAVAILABLE:'设置页动作不能使用聊天、存储等宿主能力。'};
+const defaultArgumentBytes=128*1024;
+// A 7 MiB recording fits under this cap after Base64 encoding and JSON wrapping.
+export function settingsActionBytes(id,name){
+  return id==='speech-synthesis'&&name==='clone-voice'?10*1024*1024:defaultArgumentBytes;
+}
 function readable(error){
   if(error.status&&error.status!==400||!/^PLUGIN_[A-Z0-9_]+$/.test(error.message))return error;
   return fail(MESSAGES[error.message]??'插件设置动作未完成（'+error.message+'）。',error.message==='PLUGIN_TIMEOUT'?504:503);
@@ -18,7 +23,8 @@ export function createSettingsActionRunner({root,describe,now=Date.now,timeoutMs
     if(!item)throw fail('插件已卸载或清单无效。',404);
     if(packageRevision!==item.revision)throw fail('插件包已更新，请重新打开配置页。',409);
     if(!describe(item).ui?.settings?.actions?.includes(name))throw fail('此动作未在插件设置页声明。',404);
-    if(!args||typeof args!=='object'||Array.isArray(args)||Buffer.byteLength(JSON.stringify(args))>128*1024)throw fail('动作参数必须是对象。');
+    if(!args||typeof args!=='object'||Array.isArray(args))throw fail('动作参数必须是对象。');
+    if(Buffer.byteLength(JSON.stringify(args))>settingsActionBytes(id,name))throw fail('动作参数过大。',413);
     if(running.size>=2)throw fail('已有插件检测正在进行，请稍后再试。',429);
     const saved=configuration(root).config.plugins[id]??{},worker=new PluginProcess(item),controller=new AbortController();
     const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();

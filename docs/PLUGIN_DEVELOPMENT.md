@@ -229,9 +229,15 @@ export function setup(api) {
 | 能力 | 宿主何时调用 | 动作与参数 | 所需权限 |
 | --- | --- | --- | --- |
 | `voice-input-v1` | 收到已授权聊天的微信语音 | `transcribe`，`{id}`；返回 `{ok,text}` 或 `{ok:false,code}` | `audio_read`（自动推导该能力） |
+| `voice-output-v1` | 已授权聊天收到本机文字转语音请求 | `synthesize` 接收 `{text}`，通过 `ctx.audio.write(base64)` 交回 PCM WAV，返回 `{ok:true}` 或 `{ok:false,code}` | `audio_synthesize`（自动推导该能力） |
+| `voice-dialogue-v1` | 已授权的 Realtime 聊天收到新的微信语音 | `converse` 接收 `{id}`，用 `ctx.audio.read` 读取该音频，再通过 `ctx.audio.write` 交回完整 PCM WAV | `audio_read` 与 `audio_synthesize` |
 | `diary-question-v1` | 宿主识别出询问“日记 / 记事本 / 小本本”的消息 | `ask`，`{id,viewer}`（均为 64 位十六进制）；返回 `{handled,text,document}` | `reply` |
 
 同一聊天只能有一个插件处理同一能力。语音有两个候选时返回 `VOICE_PLUGIN_CONFLICT`，并在这些插件卡片上提示；日记询问有两个候选时不交给插件，按普通聊天回复，并在 DSH 日志中记录。没有候选时语音返回 `VOICE_PLUGIN_DISABLED`，日记询问按普通聊天回复。最近一次真实语音结果按处理它的插件保存在 `state/plugin-service-checks/voice-input/<插件id>.json`。
+
+`voice-output-v1` 由语音适配器调用。每次 `ctx.audio.write` 最多 256 KiB，整段最多 2 MiB，依次提交同一 WAV 的字节，格式为 16 kHz 单声道 16 位 PCM。适配器在合成完成后重新核对聊天、账号和插件授权，再进入发送流程。设置页可以独立调用声明的合成测试动作。[文字转语音发送接口](VOICE_OUTPUT.md#通过插件合成并发送)
+
+`voice-dialogue-v1` 也由语音适配器调用。启用该能力的插件以 `voiceMode: "realtime"` 参与语音对语音路由，以 `voiceMode: "separate"` 和已配置的 `recognitionModel` 参与原有转写路由。出站音频沿用 `voice-output-v1` 的 WAV 格式和限制。[Realtime 语音对语音](VOICE_OUTPUT.md#realtime-语音对语音)
 
 ## 打包、更新和卸载
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {readerAccountDirectory} from './reader-account-state.mjs';
 import {hookProfile} from './hook-profiles.mjs';
+import {InputSender,INPUT_BACKEND,inputAccountProblem} from './input-sender.mjs';
 
 const failure=code=>Object.assign(new Error(code),{code});
 const transient=new Set(['HOOK_NOT_LISTENING','HOOK_HEALTH_TIMEOUT','HOOK_HEALTH_FAILED','HOOK_LOGIN_REQUIRED','HOOK_INITIALIZATION_PENDING']);
@@ -28,7 +29,17 @@ export async function verifyWeChatAccount({root,config,settings,fetchImpl=fetch,
   if(!Number.isFinite(timeoutMs)||timeoutMs<0||timeoutMs>60000||!Number.isFinite(intervalMs)||intervalMs<1)throw failure('READER_ACCOUNT_STATE_INVALID');
   const directory=readerAccountDirectory(root,settings);
   if(!directory)throw failure('READER_PATH_MISSING');
-  const expected=path.basename(directory).toLowerCase(),url=new URL(config.hook.baseUrl);
+  const expected=path.basename(directory).toLowerCase();
+  if(config.runtime?.sender===INPUT_BACKEND){
+    const sender=new InputSender(root);
+    try{
+      const health=await sender.request('health',{account:expected});
+      const problem=inputAccountProblem(health,expected);
+      if(problem)throw failure(problem);
+      return {ready:true,pid:health.pid};
+    }finally{sender.close();}
+  }
+  const url=new URL(config.hook.baseUrl);
   if(url.protocol!=='http:'||url.hostname!=='127.0.0.1'||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw failure('HOOK_LOOPBACK_REQUIRED');
   let token;try{token=fs.readFileSync(path.join(root,'state/hook/native-token.txt'),'utf8').trim();}catch{throw failure('HOOK_TOKEN_MISSING');}
   if(!/^[a-f0-9]{64}$/.test(token))throw failure('HOOK_TOKEN_MISSING');
