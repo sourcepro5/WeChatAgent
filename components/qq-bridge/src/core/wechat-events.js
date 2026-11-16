@@ -47,3 +47,31 @@ export function forwardedRecordText(record) {
     lines.join('\n')+(record.unavailable?'\n[卡片未包含可解析的正文，不能根据标题猜测内容]':'')+
     (record.truncated?'\n[记录过长或嵌套过深，部分内容已截断]':'');
 }
+
+// WeChat 4.x packs an appmsg local type as (appmsg subtype << 32) | 49.
+// A shared card never arrives as a bare 49; the subtype carries the meaning.
+export const CARD_TYPE = 49;
+export const CARD_TYPES = [4, 5, 33, 36, 51, 53, 2000].map(type => type * 2 ** 32 + 49);
+const CARD_LABELS={4:'分享文章',5:'分享链接',33:'分享小程序',36:'分享小程序',51:'分享视频号',53:'分享接龙',2000:'分享转账'};
+const bounded=(value,limit)=>typeof value==='string'&&value.length<=limit;
+
+export function normalizeSharedCard(value) {
+  if (!value || value.version!==1 || !bounded(value.label,32)) return null;
+  if (![value.title,value.des,value.url].some(text=>bounded(text,1200)&&text.trim())) return null;
+  if (value.url!==undefined && !/^https?:\/\/\S{1,1000}$/i.test(value.url)) return null;
+  return {version:1,kind:String(value.kind??''),
+    label:CARD_LABELS[String(value.kind)]??String(value.label).slice(0,32),
+    title:bounded(value.title,600)?value.title:'',
+    des:bounded(value.des,1200)?value.des:'',
+    url:bounded(value.url,1200)?value.url:'',
+    source:bounded(value.source,80)?value.source:''};
+}
+
+export function sharedCardText(card) {
+  const lines=['['+card.label+']'];
+  if(card.title)lines.push(card.title);
+  if(card.des)lines.push(card.des);
+  if(card.source)lines.push('来源：'+card.source);
+  if(card.url)lines.push('链接：'+card.url);
+  return lines.join('\n');
+}
